@@ -63,11 +63,11 @@ describe("POST /api/v1/orders", () => {
     expect(res.body.status).toBe("pending");
     expect(res.body.buyerId).toBe(buyerId);
     expect(res.body.sellerId).toBe(sellerId);
-    expect(res.body.subtotal).toBe("100");
-    expect(res.body.shippingCost).toBe("5");
-    expect(res.body.total).toBe("105");
-    expect(res.body.platformFee).toBe("10"); // 10% of $100
-    expect(res.body.sellerPayout).toBe("95"); // $105 - $10
+    expect(res.body.subtotal).toBe("100.00");
+    expect(res.body.shippingCost).toBe("5.00");
+    expect(res.body.total).toBe("105.00");
+    expect(res.body.platformFee).toBe("10.00"); // 10% of $100
+    expect(res.body.sellerPayout).toBe("95.00"); // $105 - $10
   });
 
   it("prevents self-purchase", async () => {

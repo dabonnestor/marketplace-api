@@ -1,4 +1,5 @@
 import { pgTable, uuid, varchar, timestamp, integer, decimal, text, index, pgEnum } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const userRoleEnum = pgEnum("user_role", ["buyer", "seller"]);
 
@@ -43,11 +44,9 @@ export const listings = pgTable(
     index("listings_seller_id_idx").on(table.sellerId),
     index("listings_category_idx").on(table.category),
     index("listings_status_idx").on(table.status),
-    // Full-text search index
     index("listings_search_idx").using(
       "gin",
-      // @ts-expect-error sql template for tsvector
-      `(to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '')))`,
+      sql`(to_tsvector('english', coalesce(${table.title}, '') || ' ' || coalesce(${table.description}, '')))`,
     ),
   ],
 );
