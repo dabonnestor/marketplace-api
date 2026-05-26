@@ -252,4 +252,49 @@ describe("GET buyer/seller order lists", () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
   });
+
+  it("does not show other users' orders", async () => {
+    const listing = await createListing();
+
+    // Buyer creates an order
+    await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Register a different buyer
+    const otherBuyer = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "otherbuyer@example.com", password: "password123", name: "Other" });
+
+    const otherRes = await request(app)
+      .get("/api/v1/orders/buyer/purchases")
+      .set("Authorization", `Bearer ${otherBuyer.body.accessToken}`);
+
+    expect(otherRes.status).toBe(200);
+    expect(otherRes.body.data).toHaveLength(0);
+  });
+
+  it("filters by status", async () => {
+    const listing = await createListing();
+
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Move one order to paid
+    await request(app)
+      .patch(`/api/v1/orders/${order.body.id}/status`)
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ status: "paid" });
+
+    const res = await request(app)
+      .get("/api/v1/orders/buyer/purchases?status=paid")
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].status).toBe("paid");
+  });
 });
