@@ -145,6 +145,26 @@ describe("PATCH /api/v1/listings/:id", () => {
     expect(res.status).toBe(200);
     expect(res.body.title).toBe("New Title");
   });
+
+  it("rejects non-owner update with 403", async () => {
+    const create = await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ title: "My Item", description: "Description", price: 25, category: "Books", condition: "New" });
+
+    // Register a different user
+    const other = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "other@example.com", password: "password123", name: "Other User" });
+
+    const res = await request(app)
+      .patch(`/api/v1/listings/${create.body.id}`)
+      .set("Authorization", `Bearer ${other.body.accessToken}`)
+      .send({ title: "Stolen" });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("FORBIDDEN");
+  });
 });
 
 describe("DELETE /api/v1/listings/:id", () => {
@@ -162,5 +182,24 @@ describe("DELETE /api/v1/listings/:id", () => {
 
     const get = await request(app).get(`/api/v1/listings/${create.body.id}`);
     expect(get.status).toBe(404);
+  });
+
+  it("rejects non-owner delete with 403", async () => {
+    const create = await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ title: "My Item", description: "Description", price: 25, category: "Books", condition: "New" });
+
+    // Register a different user
+    const other = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "other2@example.com", password: "password123", name: "Other User" });
+
+    const res = await request(app)
+      .delete(`/api/v1/listings/${create.body.id}`)
+      .set("Authorization", `Bearer ${other.body.accessToken}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("FORBIDDEN");
   });
 });
