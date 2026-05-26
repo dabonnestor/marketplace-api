@@ -42,7 +42,7 @@ describe("POST /api/v1/listings", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.title).toBe("Vintage Camera");
-    expect(res.body.price).toBe("150");
+    expect(res.body.price).toBe("150.00");
     expect(res.body.sellerId).toBe(sellerId);
   });
 
