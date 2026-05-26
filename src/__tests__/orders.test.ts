@@ -82,6 +82,29 @@ describe("POST /api/v1/orders", () => {
     expect(res.body.error.code).toBe("SELF_PURCHASE");
   });
 
+  it("returns 404 for nonexistent listing", async () => {
+    const res = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: "00000000-0000-0000-0000-000000000000" });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("marks listing as sold after order creation", async () => {
+    const listing = await createListing();
+
+    await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const get = await request(app).get(`/api/v1/listings/${listing.id}`);
+
+    expect(get.status).toBe(200);
+    expect(get.body.status).toBe("sold");
+  });
+
   it("requires auth", async () => {
     const listing = await createListing();
 
