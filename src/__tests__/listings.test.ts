@@ -92,6 +92,43 @@ describe("GET /api/v1/listings", () => {
     expect(res.body.data[0].title).toBe("Book");
   });
 
+  it("searches by keyword matching title and description", async () => {
+    await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({
+        title: "Vintage Leather Jacket",
+        description: "Worn by a rockstar on tour",
+        price: 200,
+        category: "Clothing",
+        condition: "Used",
+      });
+
+    await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({
+        title: "Denim Shorts",
+        description: "Vintage style with leather trim",
+        price: 45,
+        category: "Clothing",
+        condition: "Used",
+      });
+
+    const res = await request(app).get("/api/v1/listings?search=vintage");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+  });
+
+  it("returns empty array when no listings match", async () => {
+    const res = await request(app).get("/api/v1/listings?search=nonexistentxyz");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(0);
+    expect(res.body.pagination.total).toBe(0);
+  });
+
   it("filters by price range", async () => {
     await request(app)
       .post("/api/v1/listings")
