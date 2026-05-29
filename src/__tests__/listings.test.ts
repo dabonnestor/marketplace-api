@@ -204,6 +204,87 @@ describe("PATCH /api/v1/listings/:id", () => {
   });
 });
 
+describe("GET /api/v1/listings/mine", () => {
+  it("returns authenticated seller's listings with pagination", async () => {
+    await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ title: "My Item 1", description: "First", price: 10, category: "Books", condition: "New" });
+
+    await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ title: "My Item 2", description: "Second", price: 20, category: "Electronics", condition: "New" });
+
+    const res = await request(app)
+      .get("/api/v1/listings/mine")
+      .set("Authorization", `Bearer ${sellerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.pagination.total).toBe(2);
+    expect(res.body.pagination.page).toBe(1);
+    expect(res.body.pagination.limit).toBe(20);
+  });
+
+  it("requires auth", async () => {
+    const res = await request(app).get("/api/v1/listings/mine");
+    expect(res.status).toBe(401);
+  });
+
+  it("only returns the authenticated seller's listings", async () => {
+    // Create listing as seller
+    await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ title: "Seller Item", description: "Mine", price: 10, category: "Books", condition: "New" });
+
+    // Register a different seller and create their listing
+    const other = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "other@example.com", password: "password123", name: "Other Seller" });
+
+    await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${other.body.accessToken}`)
+      .send({ title: "Other Item", description: "Theirs", price: 20, category: "Books", condition: "New" });
+
+    const res = await request(app)
+      .get("/api/v1/listings/mine")
+      .set("Authorization", `Bearer ${sellerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].title).toBe("Seller Item");
+  });
+
+  it("includes sold listings", async () => {
+    // Create a listing
+    const create = await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ title: "For Sale", description: "Buy me", price: 50, category: "Books", condition: "New" });
+
+    // Mark it as sold directly via a buyer purchasing it
+    const buyer = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "buyer@example.com", password: "password123", name: "Buyer" });
+
+    await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyer.body.accessToken}`)
+      .send({ listingId: create.body.id });
+
+    const res = await request(app)
+      .get("/api/v1/listings/mine")
+      .set("Authorization", `Bearer ${sellerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].status).toBe("sold");
+  });
+});
+
 describe("DELETE /api/v1/listings/:id", () => {
   it("deletes a listing", async () => {
     const create = await request(app)

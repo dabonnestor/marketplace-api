@@ -21,6 +21,12 @@ export const listListingsSchema = z.object({
   search: z.string().optional(),
 });
 
+export const myListingsSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
 export type CreateListingInput = z.infer<typeof createListingSchema>;
 export type UpdateListingInput = z.infer<typeof updateListingSchema>;
 export type ListListingsQuery = z.infer<typeof listListingsSchema>;
+export type MyListingsQuery = z.infer<typeof myListingsSchema>;
