@@ -5,6 +5,7 @@ import {
   createListingSchema,
   updateListingSchema,
   listListingsSchema,
+  myListingsSchema,
 } from "./listings.schemas.js";
 import * as listingsService from "./listings.service.js";
 
@@ -14,6 +15,17 @@ export const listingsRouter = Router();
 listingsRouter.get("/", validate(listListingsSchema, "query"), async (req, res, next) => {
   try {
     const result = await listingsService.list(req.query as any);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Seller: list own listings (active + sold) for dashboard
+listingsRouter.get("/mine", authenticate, validate(myListingsSchema, "query"), async (req, res, next) => {
+  try {
+    const { page, limit } = req.query as any;
+    const result = await listingsService.getBySeller(req.user!.sub, page, limit);
     res.json(result);
   } catch (err) {
     next(err);

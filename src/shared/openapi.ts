@@ -278,6 +278,33 @@ export const openApiSpec = {
         },
       },
     },
+    "/api/v1/listings/mine": {
+      get: {
+        tags: ["Listings"],
+        summary: "List the authenticated seller's own listings (active + sold)",
+        parameters: [
+          { name: "page", in: "query", schema: { type: "integer", default: 1 } },
+          { name: "limit", in: "query", schema: { type: "integer", default: 20 } },
+        ],
+        responses: {
+          "200": {
+            description: "Paginated seller listings",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    data: { type: "array", items: { $ref: "#/components/schemas/Listing" } },
+                    pagination: { $ref: "#/components/schemas/Pagination" },
+                  },
+                },
+              },
+            },
+          },
+          "401": { description: "Not authenticated" },
+        },
+      },
+    },
     "/api/v1/listings/{id}": {
       get: {
         tags: ["Listings"],
