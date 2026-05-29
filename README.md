@@ -27,22 +27,22 @@ The API runs at `http://localhost:3000`. API docs are at `http://localhost:3000/
 - `POST /api/v1/auth/register` — Register a new user
 - `POST /api/v1/auth/login` — Log in, receive access + refresh tokens
 - `POST /api/v1/auth/refresh` — Refresh an expired access token
+- `GET /api/v1/auth/me` — Get the authenticated user's profile
 
 ### Listings
 - `POST /api/v1/listings` — Create a listing (auth required)
 - `GET /api/v1/listings` — Browse active listings (paginated, filterable by category, price range, keyword search)
+- `GET /api/v1/listings/mine` — List your own listings, active and sold (seller, paginated)
 - `GET /api/v1/listings/:id` — Get listing details
-- `PUT /api/v1/listings/:id` — Update your listing (seller only)
+- `PATCH /api/v1/listings/:id` — Update your listing (seller only)
 - `DELETE /api/v1/listings/:id` — Delete your listing (seller only)
 
 ### Orders
 - `POST /api/v1/orders` — Place an order on a listing (buyer only, cannot buy own listing)
-- `PATCH /api/v1/orders/:id/pay` — Mark order as paid (buyer only)
-- `PATCH /api/v1/orders/:id/ship` — Mark order as shipped (seller only)
-- `PATCH /api/v1/orders/:id/deliver` — Mark order as delivered (seller only)
-- `PATCH /api/v1/orders/:id/complete` — Confirm delivery and finalize (buyer only)
-- `GET /api/v1/orders/purchases` — View your purchase history (buyer, paginated, status filter)
-- `GET /api/v1/orders/sales` — View your sales history (seller, paginated, status filter)
+- `GET /api/v1/orders/buyer/purchases` — View your purchase history (buyer, paginated, status filter)
+- `GET /api/v1/orders/seller/sales` — View your sales history (seller, paginated, status filter)
+- `GET /api/v1/orders/:id` — Get a single order (buyer or seller only)
+- `PATCH /api/v1/orders/:id/status` — Transition order status (role-gated state machine)
 
 ### General
 - `GET /api/health` — Health check
