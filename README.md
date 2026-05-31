@@ -87,23 +87,44 @@ Status transitions are role-gated (e.g., only the buyer can mark paid, only the 
 src/
 ├── app.ts              # Express app factory
 ├── main.ts             # Entry point
+├── test-setup.ts       # Test environment setup
 ├── db/
 │   ├── schema.ts       # Drizzle schema (users, listings, orders)
 │   ├── index.ts        # DB connection
 │   ├── migrate.ts      # Migration runner
 │   └── migrations/     # SQL migrations
 ├── features/
-│   ├── auth/           # Register, login, refresh
-│   ├── listings/       # CRUD + search/filter
-│   ├── orders/         # Create + state machine transitions
-│   └── users/
+│   ├── auth/
+│   │   ├── auth.routes.ts    # Route handlers
+│   │   ├── auth.schemas.ts   # Zod schemas + OpenAPI
+│   │   ├── auth.service.ts   # Business logic
+│   │   └── openapi.ts        # Co-located OpenAPI paths
+│   ├── listings/
+│   │   ├── listings.routes.ts
+│   │   ├── listings.schemas.ts
+│   │   ├── listings.service.ts
+│   │   └── openapi.ts
+│   └── orders/
+│       ├── orders.routes.ts
+│       ├── orders.schemas.ts
+│       ├── orders.service.ts
+│       ├── state-machine.ts  # Order lifecycle state machine
+│       ├── openapi.ts
+│       └── __tests__/
 ├── shared/
 │   ├── config.ts       # Env var validation
 │   ├── errors.ts       # Custom error classes
+│   ├── guards.ts       # Ownership verification guards
 │   ├── logger.ts       # Pino logger
 │   ├── openapi.ts      # OpenAPI spec builder
-│   └── middleware/      # Auth guard, validation, error handler
-└── __tests__/          # Integration tests
+│   ├── pagination.ts   # Shared paginate helper
+│   ├── middleware/
+│   │   ├── async-handler.ts  # Async error boundary
+│   │   ├── auth.ts           # JWT auth middleware
+│   │   ├── error-handler.ts  # Global error handler
+│   │   └── validate.ts       # Zod request validation
+│   └── __tests__/
+└── __tests__/          # Feature integration tests
 ```
 
 ## Environment Variables
