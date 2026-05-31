@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — marketplace-api</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <!-- HEADER -->
+      <header class="space-y-3">
+        <h1 class="text-3xl font-serif font-semibold tracking-tight">Architecture review &mdash; marketplace-api</h1>
+        <p class="text-sm text-slate-500">2026-05-30 &middot; 6 candidates</p>
+        <div class="flex flex-wrap gap-4 text-xs font-mono">
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded border-2 border-slate-700 inline-block"></span> module
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-0 border-t-2 border-dashed border-slate-500 inline-block"></span> seam
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-0 border-t-2 inline-block" style="border-color:#dc2626"></span> leakage
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded deep inline-block"></span> deep module
+          </div>
+        </div>
+      </header>
+
+      <!-- CANDIDATES -->
+      <section id="candidates" class="space-y-10">
+
+        <!-- Candidate 1: Async route wrapper -->
+        <article class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-serif font-semibold">Collapse try/catch into an async route wrapper</h2>
+            <div class="flex gap-2 flex-shrink-0">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500">auth.routes.ts, listings.routes.ts, orders.routes.ts, new shared/middleware/async-handler.ts</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before &mdash; 3 route files &times; N handlers</p>
+              <pre class="mermaid">
+                flowchart TD
+                  R1[auth/register] --> T1[try/catch/next]
+                  R2[auth/login] --> T2[try/catch/next]
+                  R3[auth/refresh] --> T3[try/catch/next]
+                  R4[auth/me] --> T4[try/catch/next]
+                  L1[listings/* x6] --> T5[try/catch/next]
+                  O1[orders/* x6] --> T6[try/catch/next]
+                  T1 --> S1[authService]
+                  T2 --> S2[authService]
+                  T3 --> S3[authService]
+                  T4 --> S4[authService]
+                  T5 --> LS[listingsService]
+                  T6 --> OS[ordersService]
+                  classDef boilerplate fill:#fef2f2,stroke:#dc2626,stroke-width:1px;
+                  class T1,T2,T3,T4,T5,T6 boilerplate
+              </pre>
+              <p class="text-xs text-slate-400 mt-2">Each handler independently replicates the error-forwarding contract.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After &mdash; wrapper absorbs the boilerplate</p>
+              <div class="deep rounded-lg p-4 text-white text-xs space-y-2">
+                <p class="font-semibold text-sm">asyncHandler</p>
+                <p class="text-slate-300">catches rejected promises, forwards to next(err)</p>
+              </div>
+              <div class="mt-3 space-y-1 text-xs">
+                <div class="border border-slate-300 rounded p-1.5 bg-white">handler → <span class="text-emerald-700 font-medium">call service</span></div>
+                <div class="border border-slate-300 rounded p-1.5 bg-white">handler → <span class="text-emerald-700 font-medium">call service</span></div>
+                <div class="border border-slate-300 rounded p-1.5 bg-white">handler → <span class="text-emerald-700 font-medium">call service</span></div>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">One interface. Route handlers declare intent; wrapper handles the contract.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Problem</p>
+              <p class="mt-1">Every route handler wraps its body in identical <code class="font-mono text-xs bg-slate-100 rounded px-1">try { ... } catch (err) { next(err) }</code>. The interface (what a handler must do) is nearly as complex as the implementation (the boilerplate). No locality.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Solution</p>
+              <p class="mt-1">An <code class="font-mono text-xs bg-slate-100 rounded px-1">asyncHandler(fn)</code> wrapper that catches rejected promises and forwards to <code class="font-mono text-xs bg-slate-100 rounded px-1">next</code>. Express 5 ships this natively; for Express 4, it's 4 lines.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Wins</p>
+              <ul class="mt-1 space-y-0.5 list-disc list-inside text-xs">
+                <li>Delete ~25 lines of boilerplate</li>
+                <li>Leverage: one wrapper, 13+ call sites</li>
+                <li>Locality: error forwarding lives in one place</li>
+                <li>Interface shrinks: handlers declare intent, not plumbing</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- Candidate 2: Pagination module -->
+        <article class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-serif font-semibold">Extract pagination into a shared module</h2>
+            <div class="flex gap-2 flex-shrink-0">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500">listings.service.ts (list, getBySeller), orders.service.ts (listBuyerOrders, listSellerOrders), new shared/pagination.ts</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before &mdash; 4 independent copies of the same pattern</p>
+              <div class="space-y-2">
+                <div class="border border-red-200 bg-red-50 rounded p-2 text-xs">
+                  <span class="font-mono font-semibold">listings.list()</span>
+                  <div class="mt-1 space-y-0.5 text-[10px] font-mono text-slate-500">
+                    <div>offset = (page - 1) * limit</div>
+                    <div>Promise.all([query, count])</div>
+                    <div>{ data, pagination }</div>
+                  </div>
+                </div>
+                <div class="border border-red-200 bg-red-50 rounded p-2 text-xs">
+                  <span class="font-mono font-semibold">listings.getBySeller()</span>
+                  <div class="mt-1 space-y-0.5 text-[10px] font-mono text-slate-500">
+                    <div>offset = (page - 1) * limit</div>
+                    <div>Promise.all([query, count])</div>
+                    <div>{ data, pagination }</div>
+                  </div>
+                </div>
+                <div class="border border-red-200 bg-red-50 rounded p-2 text-xs">
+                  <span class="font-mono font-semibold">orders.listBuyerOrders()</span>
+                  <div class="mt-1 space-y-0.5 text-[10px] font-mono text-slate-500">
+                    <div>offset = (page - 1) * limit</div>
+                    <div>Promise.all([query, count])</div>
+                    <div>{ data, pagination }</div>
+                  </div>
+                </div>
+                <div class="border border-red-200 bg-red-50 rounded p-2 text-xs">
+                  <span class="font-mono font-semibold">orders.listSellerOrders()</span>
+                  <div class="mt-1 space-y-0.5 text-[10px] font-mono text-slate-500">
+                    <div>offset = (page - 1) * limit</div>
+                    <div>Promise.all([query, count])</div>
+                    <div>{ data, pagination }</div>
+                  </div>
+                </div>
+              </div>
+              <p class="text-xs text-red-500 mt-2">Contract change requires 4 edits. No locality.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After &mdash; one deep module, 4 thin callers</p>
+              <div class="deep rounded-lg p-4 text-white text-xs space-y-2">
+                <p class="font-semibold text-sm">paginate</p>
+                <p class="text-slate-300 font-mono text-[10px]">(query, countQuery, page, limit) → PaginatedResult</p>
+              </div>
+              <div class="mt-3 space-y-1.5 text-xs">
+                <div class="border border-slate-300 rounded p-1.5 bg-white font-mono">
+                  list() → <span class="text-emerald-700">paginate(builtQuery, countQuery, page, limit)</span>
+                </div>
+                <div class="border border-slate-300 rounded p-1.5 bg-white font-mono">
+                  getBySeller() → <span class="text-emerald-700">paginate(...)</span>
+                </div>
+                <div class="border border-slate-300 rounded p-1.5 bg-white font-mono">
+                  listBuyerOrders() → <span class="text-emerald-700">paginate(...)</span>
+                </div>
+                <div class="border border-slate-300 rounded p-1.5 bg-white font-mono">
+                  listSellerOrders() → <span class="text-emerald-700">paginate(...)</span>
+                </div>
+              </div>
+              <p class="text-xs text-emerald-700 mt-2">One interface. 4 callers delegate. Contract change = 1 edit.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Problem</p>
+              <p class="mt-1">The pagination pattern &mdash; offset calculation, parallel data+count queries, <code class="font-mono text-xs bg-slate-100 rounded px-1">{ data, pagination }</code> shape &mdash; is copy-pasted 4 times. If the contract changes, 4 sites must be updated.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Solution</p>
+              <p class="mt-1">A <code class="font-mono text-xs bg-slate-100 rounded px-1">paginate</code> function that accepts a Drizzle query builder and page/limit params, returns the standard <code class="font-mono text-xs bg-slate-100 rounded px-1">{ data, pagination }</code> shape.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Wins</p>
+              <ul class="mt-1 space-y-0.5 list-disc list-inside text-xs">
+                <li>Locality: pagination logic in one module</li>
+                <li>Leverage: one interface, 4+ call sites</li>
+                <li>Interface shrinks: caller passes query, gets result</li>
+                <li>4 shallow implementations → 1 deep module</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- Candidate 3: Order state machine extraction -->
+        <article class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-serif font-semibold">Extract the Order state machine into its own deep module</h2>
+            <div class="flex gap-2 flex-shrink-0">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500">features/orders/orders.service.ts (VALID_TRANSITIONS, canTransition, transitionStatus), new features/orders/state-machine.ts</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before &mdash; deep rules buried in shallow service</p>
+              <div class="border border-red-200 rounded-lg p-3 bg-white">
+                <p class="text-xs font-mono font-semibold">orders.service.ts</p>
+                <div class="mt-2 space-y-1">
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-100 bg-white">VALID_TRANSITIONS map</div>
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-100 bg-white">canTransition(from, to)</div>
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-200 bg-stone-50">DB: getOrder(id, userId)</div>
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-100 bg-white">role authorization if/else chain</div>
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-100 bg-white">timestamp field map</div>
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-200 bg-stone-50">DB: update() returning()</div>
+                </div>
+              </div>
+              <p class="text-xs text-red-500 mt-2">Deep business rules interleaved with shallow DB queries. Only testable through full HTTP stack.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After &mdash; deep module with clean interface</p>
+              <div class="deep rounded-lg p-4 text-white text-xs space-y-2">
+                <p class="font-semibold text-sm">OrderStateMachine</p>
+                <p class="text-slate-300 font-mono text-[10px]">transition(from, to, role) → { allowed, timestampField?, error? }</p>
+              </div>
+              <div class="mt-3 border border-slate-200 rounded-lg p-3 bg-white">
+                <p class="text-xs font-mono font-semibold text-slate-400">orders.service.ts (now shallow)</p>
+                <div class="mt-2 space-y-1">
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-200 bg-stone-50">DB: getOrder(id, userId)</div>
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-emerald-200 bg-emerald-50">machine.transition(from, to, role)</div>
+                  <div class="text-[10px] font-mono px-2 py-1 rounded border border-slate-200 bg-stone-50">DB: update() returning()</div>
+                </div>
+              </div>
+              <p class="text-xs text-emerald-700 mt-2">State machine testable without DB. Service becomes a thin adapter.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Problem</p>
+              <p class="mt-1">The order state machine &mdash; <code class="font-mono text-xs bg-slate-100 rounded px-1">VALID_TRANSITIONS</code>, transition validation, role authorization rules, timestamp field mapping &mdash; is embedded in <code class="font-mono text-xs bg-slate-100 rounded px-1">orders.service.ts</code> alongside raw Drizzle queries. The deep part is surrounded by shallow plumbing.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Solution</p>
+              <p class="mt-1">Extract the state machine into its own module with a single-function interface: <code class="font-mono text-xs bg-slate-100 rounded px-1">transition(from, to, role) → result</code>. The service becomes an adapter that calls the machine, then executes the DB update.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Wins</p>
+              <ul class="mt-1 space-y-0.5 list-disc list-inside text-xs">
+                <li>Locality: all transition rules in one module</li>
+                <li>Interface is the test surface &mdash; testable without DB</li>
+                <li>Leverage: state machine reused if webhooks arrive</li>
+                <li>Service shrinks to: fetch, decide, write</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- Candidate 4: Ownership verification -->
+        <article class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-serif font-semibold">Deduplicate ownership verification across services</h2>
+            <div class="flex gap-2 flex-shrink-0">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500">listings.service.ts (update, remove), orders.service.ts (getOrder, transitionStatus), new shared/guards.ts</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before &mdash; authorization scattered across service methods</p>
+              <div class="space-y-2 text-xs font-mono">
+                <div class="border border-red-200 bg-red-50 rounded p-2">
+                  <span class="font-semibold">listings.update()</span>
+                  <pre class="text-[10px] text-slate-500 mt-1">if (listing.sellerId !== sellerId)
+  throw new ForbiddenError(...)</pre>
+                </div>
+                <div class="border border-red-200 bg-red-50 rounded p-2">
+                  <span class="font-semibold">listings.remove()</span>
+                  <pre class="text-[10px] text-slate-500 mt-1">if (listing.sellerId !== sellerId)
+  throw new ForbiddenError(...)</pre>
+                </div>
+                <div class="border border-red-200 bg-red-50 rounded p-2">
+                  <span class="font-semibold">orders.getOrder()</span>
+                  <pre class="text-[10px] text-slate-500 mt-1">if (order.buyerId !== userId &&
+    order.sellerId !== userId)
+  throw new ForbiddenError(...)</pre>
+                </div>
+                <div class="border border-red-200 bg-red-50 rounded p-2">
+                  <span class="font-semibold">orders.transitionStatus()</span>
+                  <pre class="text-[10px] text-slate-500 mt-1">if (newStatus === "paid" &&
+    order.buyerId !== userId)
+  throw new ForbiddenError(...)
+// ... repeated per status</pre>
+                </div>
+              </div>
+              <p class="text-xs text-red-500 mt-2">Same pattern, different conditions, no shared language.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After &mdash; guards consolidate authorization rules</p>
+              <div class="deep rounded-lg p-4 text-white text-xs space-y-2">
+                <p class="font-semibold text-sm">ensureOwner</p>
+                <p class="text-slate-300 font-mono text-[10px]">(resource, userId) → void | throws ForbiddenError</p>
+                <hr class="border-slate-600 my-2" />
+                <p class="font-semibold text-sm">ensureParticipant</p>
+                <p class="text-slate-300 font-mono text-[10px]">(order, userId) → void | throws ForbiddenError</p>
+              </div>
+              <div class="mt-3 space-y-1 text-xs font-mono">
+                <div class="border border-slate-300 rounded p-1.5 bg-white">
+                  update() → <span class="text-emerald-700">ensureOwner(listing, sellerId)</span>
+                </div>
+                <div class="border border-slate-300 rounded p-1.5 bg-white">
+                  remove() → <span class="text-emerald-700">ensureOwner(listing, sellerId)</span>
+                </div>
+                <div class="border border-slate-300 rounded p-1.5 bg-white">
+                  getOrder() → <span class="text-emerald-700">ensureParticipant(order, userId)</span>
+                </div>
+              </div>
+              <p class="text-xs text-emerald-700 mt-2">Authorization vocabulary in one module.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Problem</p>
+              <p class="mt-1">The pattern "check <code class="font-mono text-xs bg-slate-100 rounded px-1">sellerId !== userId</code>, throw <code class="font-mono text-xs bg-slate-100 rounded px-1">ForbiddenError</code>" repeats across listings and orders services. Authorization logic has no locality.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Solution</p>
+              <p class="mt-1">Extract <code class="font-mono text-xs bg-slate-100 rounded px-1">ensureOwner(resource, userId)</code> and <code class="font-mono text-xs bg-slate-100 rounded px-1">ensureParticipant(order, userId)</code> into a shared guards module. Services compose them: fetch, guard, act.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Wins</p>
+              <ul class="mt-1 space-y-0.5 list-disc list-inside text-xs">
+                <li>Locality: authorization rules in one module</li>
+                <li>Leverage: two guard functions serve all features</li>
+                <li>Consistent error messages and codes</li>
+                <li>Services read: "guard, then act"</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- Candidate 5: OpenAPI spec co-location -->
+        <article class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-serif font-semibold">Co-locate OpenAPI path definitions with features</h2>
+            <div class="flex gap-2 flex-shrink-0">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500">shared/openapi.ts (460 lines → ~50), new features/*/openapi.ts</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before &mdash; monolith spec couples unrelated features</p>
+              <div class="border border-red-200 rounded p-3 bg-white">
+                <div class="text-xs font-mono font-semibold mb-2">shared/openapi.ts (460 lines)</div>
+                <div class="flex flex-col gap-1 text-[10px] font-mono">
+                  <div class="px-2 py-1 bg-red-50 rounded border border-red-100">imports from auth.schemas</div>
+                  <div class="px-2 py-1 bg-red-50 rounded border border-red-100">imports from listings.schemas</div>
+                  <div class="px-2 py-1 bg-red-50 rounded border border-red-100">imports from orders.schemas</div>
+                  <div class="px-2 py-0.5 text-slate-400">...</div>
+                  <div class="px-2 py-1 bg-stone-50 rounded border border-slate-100">/api/v1/auth/* paths</div>
+                  <div class="px-2 py-1 bg-stone-50 rounded border border-slate-100">/api/v1/listings/* paths</div>
+                  <div class="px-2 py-1 bg-stone-50 rounded border border-slate-100">/api/v1/orders/* paths</div>
+                </div>
+              </div>
+              <p class="text-xs text-red-500 mt-2">Deletion test: removing the auth feature requires surgical extraction from this file.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After &mdash; each feature exports its own paths</p>
+              <div class="space-y-2">
+                <div class="border border-emerald-200 rounded p-2 bg-emerald-50 text-xs font-mono">
+                  features/auth/openapi.ts
+                  <span class="block text-[10px] text-slate-500">exports authPaths, authSchemas</span>
+                </div>
+                <div class="border border-emerald-200 rounded p-2 bg-emerald-50 text-xs font-mono">
+                  features/listings/openapi.ts
+                  <span class="block text-[10px] text-slate-500">exports listingPaths, listingSchemas</span>
+                </div>
+                <div class="border border-emerald-200 rounded p-2 bg-emerald-50 text-xs font-mono">
+                  features/orders/openapi.ts
+                  <span class="block text-[10px] text-slate-500">exports orderPaths, orderSchemas</span>
+                </div>
+                <div class="deep rounded-lg p-3 text-white text-xs text-center">
+                  <span class="font-mono font-semibold">shared/openapi.ts</span>
+                  <span class="block text-slate-300 text-[10px]">merges feature specs + shared schemas</span>
+                </div>
+              </div>
+              <p class="text-xs text-emerald-700 mt-2">Deletion test: delete features/auth/ → docs vanish with it. Matches the stated architecture.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Problem</p>
+              <p class="mt-1">The OpenAPI spec is a single 460-line file importing from all three feature domains. It contradicts the project's stated architecture ("features co-locate routes, schemas, and service logic"). Every new endpoint grows this file linearly.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Solution</p>
+              <p class="mt-1">Each feature exports its own path definitions and component schemas from <code class="font-mono text-xs bg-slate-100 rounded px-1">features/X/openapi.ts</code>. <code class="font-mono text-xs bg-slate-100 rounded px-1">shared/openapi.ts</code> becomes a thin merge point.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Wins</p>
+              <ul class="mt-1 space-y-0.5 list-disc list-inside text-xs">
+                <li>Locality: each feature's docs live with its code</li>
+                <li>Deletion test passes cleanly per feature</li>
+                <li>Parallel editing without merge conflicts</li>
+                <li>Matches existing feature co-location pattern</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- Candidate 6: db module splits connection from schema -->
+        <article class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-serif font-semibold">Split db connection management from schema re-export</h2>
+            <div class="flex gap-2 flex-shrink-0">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">Speculative</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500">db/index.ts, db/schema.ts, all feature service files</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before &mdash; two concerns, one module</p>
+              <pre class="mermaid">
+                flowchart LR
+                  A[auth.service] --> DB[db/index.ts]
+                  B[listings.service] --> DB
+                  C[orders.service] --> DB
+                  DB --> PG[(pg.Pool)]
+                  DB --> SC[schema re-export]
+                  classDef concern fill:#fef2f2,stroke:#dc2626
+                  class DB concern
+              </pre>
+              <p class="text-xs text-slate-400 mt-2">db/index.ts has two interfaces: connection lifecycle and schema access.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After &mdash; one concern per module</p>
+              <pre class="mermaid">
+                flowchart LR
+                  A[auth.service] --> DB[db/index.ts]
+                  A --> SC2[db/schema.ts]
+                  B[listings.service] --> DB
+                  B --> SC2
+                  C[orders.service] --> DB
+                  C --> SC2
+                  DB --> PG[(pg.Pool)]
+              </pre>
+              <p class="text-xs text-emerald-700 mt-2">Each module has one responsibility. Schema import path is direct.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Problem</p>
+              <p class="mt-1"><code class="font-mono text-xs bg-slate-100 rounded px-1">db/index.ts</code> both creates the pg Pool + Drizzle instance and re-exports the schema. Two interfaces: connection management and schema access. Every feature crosses this module for both concerns.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Solution</p>
+              <p class="mt-1">Import schema directly from <code class="font-mono text-xs bg-slate-100 rounded px-1">db/schema.js</code> where it's defined. <code class="font-mono text-xs bg-slate-100 rounded px-1">db/index.ts</code> stays as the connection module. 3 import path changes.</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-500 text-xs uppercase tracking-wider">Wins</p>
+              <ul class="mt-1 space-y-0.5 list-disc list-inside text-xs">
+                <li>One responsibility per module</li>
+                <li>Schema import path is direct</li>
+                <li>Two interfaces instead of one merged interface</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+      </section>
+
+      <!-- TOP RECOMMENDATION -->
+      <section id="top-recommendation" class="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-6 space-y-3">
+        <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Top recommendation</p>
+        <h2 class="text-xl font-serif font-semibold">
+          <a href="#candidates" class="hover:underline">Collapse try/catch into an async route wrapper</a>
+        </h2>
+        <p class="text-sm text-slate-700">Smallest change with the widest impact. Touches every route file, eliminates ~25 lines of boilerplate, and the win is immediately visible in every route handler. The wrapper is 4 lines of code. It's the definition of depth: a large amount of behaviour (error forwarding for every route) behind a tiny interface (<code class="font-mono text-xs bg-emerald-100 rounded px-1">asyncHandler(fn)</code>). Do this first &mdash; every subsequent refactor is cleaner because route handlers stop pretending to manage their own error flow.</p>
+      </section>
+
+    </main>
+  </body>
+</html>
