@@ -1,6 +1,7 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and, sql, gte, lte, desc } from "drizzle-orm";
-import { NotFoundError, ForbiddenError } from "../../shared/errors.js";
+import { NotFoundError } from "../../shared/errors.js";
+import { ensureOwner } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
 import type { CreateListingInput, UpdateListingInput, ListListingsQuery } from "./listings.schemas.js";
 
@@ -34,9 +35,7 @@ export async function getById(id: string) {
 export async function update(id: string, data: UpdateListingInput, sellerId: string) {
   const listing = await getById(id);
 
-  if (listing.sellerId !== sellerId) {
-    throw new ForbiddenError("You can only update your own listings");
-  }
+  ensureOwner(listing, sellerId);
 
   const setData: Record<string, unknown> = { updatedAt: new Date() };
   if (data.title !== undefined) setData.title = data.title;
@@ -59,9 +58,7 @@ export async function update(id: string, data: UpdateListingInput, sellerId: str
 export async function remove(id: string, sellerId: string) {
   const listing = await getById(id);
 
-  if (listing.sellerId !== sellerId) {
-    throw new ForbiddenError("You can only delete your own listings");
-  }
+  ensureOwner(listing, sellerId);
 
   await db.delete(schema.listings).where(eq(schema.listings.id, id));
 }
