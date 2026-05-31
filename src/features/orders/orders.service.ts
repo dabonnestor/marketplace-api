@@ -1,6 +1,7 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { NotFoundError, ForbiddenError, AppError } from "../../shared/errors.js";
+import { ensureParticipant } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
 import { PLATFORM_FEE_PERCENT } from "./orders.schemas.js";
 import { transition, type OrderStatus } from "./state-machine.js";
@@ -62,9 +63,7 @@ export async function getOrder(orderId: string, userId: string) {
     throw new NotFoundError("Order", orderId);
   }
 
-  if (order.buyerId !== userId && order.sellerId !== userId) {
-    throw new ForbiddenError("You are not a participant in this order");
-  }
+  ensureParticipant(order, userId);
 
   return order;
 }
