@@ -1,6 +1,7 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and, sql, gte, lte, desc } from "drizzle-orm";
 import { NotFoundError, ForbiddenError } from "../../shared/errors.js";
+import { paginate } from "../../shared/pagination.js";
 import type { CreateListingInput, UpdateListingInput, ListListingsQuery } from "./listings.schemas.js";
 
 export async function create(data: CreateListingInput, sellerId: string) {
@@ -90,52 +91,31 @@ export async function list(query: ListListingsQuery) {
     );
   }
 
-  const offset = (query.page - 1) * query.limit;
+  const baseQuery = db
+    .select()
+    .from(schema.listings)
+    .where(and(...conditions))
+    .orderBy(desc(schema.listings.createdAt));
 
-  const [results, [{ count }]] = await Promise.all([
-    db
-      .select()
-      .from(schema.listings)
-      .where(and(...conditions))
-      .orderBy(desc(schema.listings.createdAt))
-      .limit(query.limit)
-      .offset(offset),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.listings)
-      .where(and(...conditions)),
-  ]);
+  const countQuery = db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.listings)
+    .where(and(...conditions));
 
-  return {
-    data: results,
-    pagination: {
-      page: query.page,
-      limit: query.limit,
-      total: count,
-      totalPages: Math.ceil(count / query.limit),
-    },
-  };
+  return paginate(baseQuery, countQuery, query.page, query.limit);
 }
 
 export async function getBySeller(sellerId: string, page: number, limit: number) {
-  const offset = (page - 1) * limit;
+  const baseQuery = db
+    .select()
+    .from(schema.listings)
+    .where(eq(schema.listings.sellerId, sellerId))
+    .orderBy(desc(schema.listings.createdAt));
 
-  const [results, [{ count }]] = await Promise.all([
-    db
-      .select()
-      .from(schema.listings)
-      .where(eq(schema.listings.sellerId, sellerId))
-      .orderBy(desc(schema.listings.createdAt))
-      .limit(limit)
-      .offset(offset),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.listings)
-      .where(eq(schema.listings.sellerId, sellerId)),
-  ]);
+  const countQuery = db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.listings)
+    .where(eq(schema.listings.sellerId, sellerId));
 
-  return {
-    data: results,
-    pagination: { page, limit, total: count, totalPages: Math.ceil(count / limit) },
-  };
+  return paginate(baseQuery, countQuery, page, limit);
 }

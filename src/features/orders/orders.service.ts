@@ -1,6 +1,7 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { NotFoundError, ForbiddenError, AppError } from "../../shared/errors.js";
+import { paginate } from "../../shared/pagination.js";
 import { PLATFORM_FEE_PERCENT } from "./orders.schemas.js";
 
 type OrderStatus = "pending" | "paid" | "shipped" | "delivered" | "completed" | "disputed" | "cancelled";
@@ -138,50 +139,34 @@ export async function listBuyerOrders(buyerId: string, page: number, limit: numb
   const conditions = [eq(schema.orders.buyerId, buyerId)];
   if (status) conditions.push(eq(schema.orders.status, status as any));
 
-  const offset = (page - 1) * limit;
+  const baseQuery = db
+    .select()
+    .from(schema.orders)
+    .where(and(...conditions))
+    .orderBy(desc(schema.orders.createdAt));
 
-  const [results, [{ count }]] = await Promise.all([
-    db
-      .select()
-      .from(schema.orders)
-      .where(and(...conditions))
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(limit)
-      .offset(offset),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.orders)
-      .where(and(...conditions)),
-  ]);
+  const countQuery = db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.orders)
+    .where(and(...conditions));
 
-  return {
-    data: results,
-    pagination: { page, limit, total: count, totalPages: Math.ceil(count / limit) },
-  };
+  return paginate(baseQuery, countQuery, page, limit);
 }
 
 export async function listSellerOrders(sellerId: string, page: number, limit: number, status?: string) {
   const conditions = [eq(schema.orders.sellerId, sellerId)];
   if (status) conditions.push(eq(schema.orders.status, status as any));
 
-  const offset = (page - 1) * limit;
+  const baseQuery = db
+    .select()
+    .from(schema.orders)
+    .where(and(...conditions))
+    .orderBy(desc(schema.orders.createdAt));
 
-  const [results, [{ count }]] = await Promise.all([
-    db
-      .select()
-      .from(schema.orders)
-      .where(and(...conditions))
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(limit)
-      .offset(offset),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.orders)
-      .where(and(...conditions)),
-  ]);
+  const countQuery = db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.orders)
+    .where(and(...conditions));
 
-  return {
-    data: results,
-    pagination: { page, limit, total: count, totalPages: Math.ceil(count / limit) },
-  };
+  return paginate(baseQuery, countQuery, page, limit);
 }
