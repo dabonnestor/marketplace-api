@@ -3,22 +3,7 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { NotFoundError, ForbiddenError, AppError } from "../../shared/errors.js";
 import { paginate } from "../../shared/pagination.js";
 import { PLATFORM_FEE_PERCENT } from "./orders.schemas.js";
-
-type OrderStatus = "pending" | "paid" | "shipped" | "delivered" | "completed" | "disputed" | "cancelled";
-
-const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  pending: ["paid", "cancelled"],
-  paid: ["shipped", "disputed", "cancelled"],
-  shipped: ["delivered", "disputed"],
-  delivered: ["completed", "disputed"],
-  completed: [],
-  disputed: ["cancelled"],
-  cancelled: [],
-};
-
-function canTransition(from: OrderStatus, to: OrderStatus): boolean {
-  return VALID_TRANSITIONS[from]?.includes(to) ?? false;
-}
+import { transition, type OrderStatus } from "./state-machine.js";
 
 export async function createOrder(buyerId: string, listingId: string) {
   // Verify listing exists and is active
@@ -91,39 +76,20 @@ export async function transitionStatus(
 ) {
   const order = await getOrder(orderId, userId);
   const currentStatus = order.status as OrderStatus;
+  const role = order.buyerId === userId ? "buyer" : "seller";
 
-  if (!canTransition(currentStatus, newStatus)) {
-    throw new AppError(
-      400,
-      "INVALID_TRANSITION",
-      `Cannot transition order from '${currentStatus}' to '${newStatus}'`,
-    );
-  }
+  const result = transition(currentStatus, newStatus, role);
 
-  // Authorization: only buyer can mark paid, only seller can mark shipped
-  if (newStatus === "paid" && order.buyerId !== userId) {
-    throw new ForbiddenError("Only the buyer can mark the order as paid");
+  if (!result.allowed) {
+    if (result.errorCode === "FORBIDDEN") {
+      throw new ForbiddenError(result.error!);
+    }
+    throw new AppError(400, result.errorCode ?? "INVALID_TRANSITION", result.error!);
   }
-  if (newStatus === "shipped" && order.sellerId !== userId) {
-    throw new ForbiddenError("Only the seller can mark the order as shipped");
-  }
-  if (newStatus === "delivered" && order.sellerId !== userId) {
-    throw new ForbiddenError("Only the seller can mark the order as delivered");
-  }
-  if (newStatus === "completed" && order.buyerId !== userId) {
-    throw new ForbiddenError("Only the buyer can confirm delivery and complete the order");
-  }
-
-  const timestampField = {
-    paid: "paidAt",
-    shipped: "shippedAt",
-    delivered: "deliveredAt",
-    completed: "completedAt",
-  } as const;
 
   const updates: Record<string, unknown> = { status: newStatus, updatedAt: new Date() };
-  if (newStatus in timestampField) {
-    updates[timestampField[newStatus as keyof typeof timestampField]] = new Date();
+  if (result.timestampField) {
+    updates[result.timestampField] = new Date();
   }
 
   const [updated] = await db
