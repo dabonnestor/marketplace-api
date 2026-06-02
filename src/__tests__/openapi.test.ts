@@ -33,6 +33,10 @@ describe("GET /api/docs.json", () => {
     expect(paths).toContain("/api/v1/orders/seller/sales");
     expect(paths).toContain("/api/v1/orders/{id}");
     expect(paths).toContain("/api/v1/orders/{id}/status");
+
+    // Seller
+    expect(paths).toContain("/api/v1/seller/onboard");
+    expect(paths).toContain("/api/v1/seller/onboard/status");
   });
 
   it("has all expected component schemas", async () => {
@@ -50,6 +54,8 @@ describe("GET /api/docs.json", () => {
     expect(schemas).toContain("Pagination");
     expect(schemas).toContain("Listing");
     expect(schemas).toContain("Order");
+    expect(schemas).toContain("OnboardResponse");
+    expect(schemas).toContain("OnboardStatus");
   });
 
   it("has security schemes defined", async () => {
