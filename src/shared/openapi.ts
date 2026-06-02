@@ -1,6 +1,7 @@
 import { authPaths, authSchemas } from "../features/auth/openapi.js";
 import { listingPaths, listingSchemas } from "../features/listings/openapi.js";
 import { orderPaths, orderSchemas } from "../features/orders/openapi.js";
+import { sellerPaths, sellerSchemas } from "../features/seller/openapi.js";
 
 const errorResponseSchema = {
   type: "object",
@@ -50,6 +51,7 @@ export const openApiSpec = {
       ...authSchemas,
       ...listingSchemas,
       ...orderSchemas,
+      ...sellerSchemas,
       Error: errorResponseSchema,
       Pagination: paginationSchema,
     },
@@ -74,5 +76,7 @@ export const openApiSpec = {
     ...listingPaths,
 
     ...orderPaths,
+
+    ...sellerPaths,
   },
 };

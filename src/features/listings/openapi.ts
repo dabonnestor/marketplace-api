@@ -65,7 +65,7 @@ export const listingPaths = {
       },
       responses: {
         "201": { description: "Listing created", content: { "application/json": { schema: { $ref: "#/components/schemas/Listing" } } } },
-        "400": { description: "Validation error" },
+        "400": { description: "Validation error or onboarding required", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
         "401": { description: "Not authenticated" },
       },
     },
