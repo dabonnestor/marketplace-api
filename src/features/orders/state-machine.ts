@@ -1,4 +1,4 @@
-export type OrderStatus = "pending" | "paid" | "shipped" | "delivered" | "completed" | "disputed" | "cancelled";
+export type OrderStatus = "pending" | "paid" | "shipped" | "delivered" | "completed" | "disputed" | "cancelled" | "expired" | "refunded";
 export type OrderRole = "buyer" | "seller";
 
 export interface TransitionResult {
@@ -9,13 +9,15 @@ export interface TransitionResult {
 }
 
 const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  pending: ["paid", "cancelled"],
-  paid: ["shipped", "disputed", "cancelled"],
-  shipped: ["delivered", "disputed"],
-  delivered: ["completed", "disputed"],
+  pending: ["paid", "cancelled", "expired"],
+  paid: ["shipped", "disputed", "refunded"],
+  shipped: ["delivered", "disputed", "refunded"],
+  delivered: ["completed", "disputed", "refunded"],
   completed: [],
-  disputed: ["cancelled"],
+  disputed: ["refunded"],
   cancelled: [],
+  expired: [],
+  refunded: [],
 };
 
 const TIMESTAMP_FIELDS: Record<string, string> = {
@@ -23,18 +25,23 @@ const TIMESTAMP_FIELDS: Record<string, string> = {
   shipped: "shippedAt",
   delivered: "deliveredAt",
   completed: "completedAt",
+  refunded: "refundedAt",
 };
 
 const ROLE_RESTRICTIONS: Record<string, OrderRole> = {
   paid: "buyer",
+  cancelled: "buyer",
   shipped: "seller",
   delivered: "seller",
   completed: "buyer",
+  refunded: "buyer",
 };
 
-export function transition(from: OrderStatus, to: OrderStatus, role: OrderRole): TransitionResult {
+export function transition(from: OrderStatus, to: OrderStatus, role: OrderRole, preDisputeStatus?: OrderStatus): TransitionResult {
   const allowedTargets = VALID_TRANSITIONS[from];
-  if (!allowedTargets.includes(to)) {
+  const isAllowed = allowedTargets.includes(to) || (from === "disputed" && preDisputeStatus === to);
+
+  if (!isAllowed) {
     return {
       allowed: false,
       error: `Cannot transition order from '${from}' to '${to}'`,
