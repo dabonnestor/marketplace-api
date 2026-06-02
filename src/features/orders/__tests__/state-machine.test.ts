@@ -50,10 +50,11 @@ describe("OrderStateMachine.transition", () => {
     expect(result.allowed).toBe(true);
   });
 
-  it("allows pending → cancelled by seller (no role restriction)", () => {
+  it("rejects pending → cancelled by seller (buyer only)", () => {
     const result = transition("pending", "cancelled", "seller");
 
-    expect(result.allowed).toBe(true);
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("FORBIDDEN");
   });
 
   it("allows shipped → disputed by buyer (no role restriction)", () => {
@@ -64,6 +65,104 @@ describe("OrderStateMachine.transition", () => {
 
   it("allows delivered → disputed by seller (no role restriction)", () => {
     const result = transition("delivered", "disputed", "seller");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("rejects any transition from expired (terminal)", () => {
+    const result = transition("expired", "paid", "buyer");
+
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("INVALID_TRANSITION");
+  });
+
+  it("rejects any transition from refunded (terminal)", () => {
+    const result = transition("refunded", "disputed", "buyer");
+
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("INVALID_TRANSITION");
+  });
+
+  it("allows pending → expired by buyer (no role restriction)", () => {
+    const result = transition("pending", "expired", "buyer");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows pending → expired by seller (no role restriction)", () => {
+    const result = transition("pending", "expired", "seller");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows paid → refunded by buyer", () => {
+    const result = transition("paid", "refunded", "buyer");
+
+    expect(result.allowed).toBe(true);
+    expect(result.timestampField).toBe("refundedAt");
+  });
+
+  it("rejects paid → refunded by seller", () => {
+    const result = transition("paid", "refunded", "seller");
+
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("FORBIDDEN");
+  });
+
+  it("allows shipped → refunded by buyer", () => {
+    const result = transition("shipped", "refunded", "buyer");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("rejects shipped → refunded by seller", () => {
+    const result = transition("shipped", "refunded", "seller");
+
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("FORBIDDEN");
+  });
+
+  it("allows delivered → refunded by buyer", () => {
+    const result = transition("delivered", "refunded", "buyer");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("rejects delivered → refunded by seller", () => {
+    const result = transition("delivered", "refunded", "seller");
+
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("FORBIDDEN");
+  });
+
+  it("allows disputed → refunded (no role restriction)", () => {
+    const result = transition("disputed", "refunded", "buyer");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("rejects disputed → cancelled (removed)", () => {
+    const result = transition("disputed", "cancelled", "buyer");
+
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("INVALID_TRANSITION");
+  });
+
+  it("allows disputed → paid when preDisputeStatus is paid", () => {
+    const result = transition("disputed", "paid", "buyer", "paid");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("rejects disputed → paid when preDisputeStatus is shipped (mismatch)", () => {
+    const result = transition("disputed", "paid", "buyer", "shipped");
+
+    expect(result.allowed).toBe(false);
+    expect(result.errorCode).toBe("INVALID_TRANSITION");
+  });
+
+  it("allows disputed → pre_dispute_status by any role", () => {
+    const result = transition("disputed", "delivered", "seller", "delivered");
 
     expect(result.allowed).toBe(true);
   });
