@@ -77,7 +77,7 @@ export async function transitionStatus(
   const currentStatus = order.status as OrderStatus;
   const role = order.buyerId === userId ? "buyer" : "seller";
 
-  const result = transition(currentStatus, newStatus, role);
+  const result = transition(currentStatus, newStatus, role, order.preDisputeStatus as OrderStatus | undefined);
 
   if (!result.allowed) {
     if (result.errorCode === "FORBIDDEN") {

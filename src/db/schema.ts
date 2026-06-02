@@ -8,6 +8,7 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 255 }).notNull().unique(),
   passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
+  stripeAccountId: varchar("stripe_account_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -20,6 +21,8 @@ export const orderStatusEnum = pgEnum("order_status", [
   "completed",
   "disputed",
   "cancelled",
+  "expired",
+  "refunded",
 ]);
 
 export const listings = pgTable(
@@ -70,10 +73,15 @@ export const orders = pgTable(
     platformFee: decimal("platform_fee", { precision: 10, scale: 2 }).notNull(),
     total: decimal("total", { precision: 12, scale: 2 }).notNull(),
     sellerPayout: decimal("seller_payout", { precision: 12, scale: 2 }).notNull(),
+    stripePaymentIntentId: varchar("stripe_payment_intent_id"),
+    stripeTransferId: varchar("stripe_transfer_id"),
+    stripeRefundId: varchar("stripe_refund_id"),
+    preDisputeStatus: orderStatusEnum("pre_dispute_status"),
     paidAt: timestamp("paid_at"),
     shippedAt: timestamp("shipped_at"),
     deliveredAt: timestamp("delivered_at"),
     completedAt: timestamp("completed_at"),
+    refundedAt: timestamp("refunded_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
