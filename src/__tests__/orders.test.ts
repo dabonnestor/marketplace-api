@@ -1,6 +1,22 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import request from "supertest";
 import { setupDb, cleanDb, closeDb, getApp } from "./helpers.js";
+
+vi.mock("../features/payments/stripe-client.js", () => ({
+  stripe: {
+    accounts: {
+      create: vi.fn().mockResolvedValue({ id: "acct_test123" }),
+      retrieve: vi.fn().mockResolvedValue({
+        id: "acct_test123",
+        charges_enabled: true,
+        payouts_enabled: true,
+      }),
+    },
+    accountLinks: {
+      create: vi.fn().mockResolvedValue({ url: "https://connect.stripe.com/setup/test" }),
+    },
+  },
+}));
 
 const app = getApp();
 
@@ -27,12 +43,16 @@ beforeEach(async () => {
   buyerToken = buyerRes.body.accessToken;
   buyerId = buyerRes.body.user.id;
 
-  // Create seller
+  // Create seller and onboard them
   const sellerRes = await request(app)
     .post("/api/v1/auth/register")
     .send({ email: "seller@example.com", password: "password123", name: "Seller" });
   sellerToken = sellerRes.body.accessToken;
   sellerId = sellerRes.body.user.id;
+
+  await request(app)
+    .post("/api/v1/seller/onboard")
+    .set("Authorization", `Bearer ${sellerToken}`);
 });
 
 async function createListing() {
