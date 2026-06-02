@@ -11,6 +11,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
+  BASE_URL: z.string().min(1).default("http://localhost:3000"),
 });
 
 const parsed = envSchema.safeParse(process.env);

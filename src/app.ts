@@ -9,6 +9,7 @@ import { errorHandler } from "./shared/middleware/error-handler.js";
 import { authRouter } from "./features/auth/auth.routes.js";
 import { listingsRouter } from "./features/listings/listings.routes.js";
 import { ordersRouter } from "./features/orders/orders.routes.js";
+import { sellerRouter } from "./features/seller/seller.routes.js";
 import { openApiSpec } from "./shared/openapi.js";
 
 export function createApp() {
@@ -64,6 +65,7 @@ export function createApp() {
   app.use("/api/v1/auth", authLimiter, authRouter);
   app.use("/api/v1/listings", listingsRouter);
   app.use("/api/v1/orders", ordersRouter);
+app.use("/api/v1/seller", sellerRouter);
 
   // Error handler (must be last)
   app.use(errorHandler);

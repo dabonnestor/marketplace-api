@@ -1,6 +1,26 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import request from "supertest";
 import { setupDb, cleanDb, closeDb, getApp } from "./helpers.js";
+
+const { mockAccountRetrieve } = vi.hoisted(() => ({
+  mockAccountRetrieve: vi.fn().mockResolvedValue({
+    id: "acct_test123",
+    charges_enabled: true,
+    payouts_enabled: true,
+  }),
+}));
+
+vi.mock("../features/payments/stripe-client.js", () => ({
+  stripe: {
+    accounts: {
+      create: vi.fn().mockResolvedValue({ id: "acct_test123" }),
+      retrieve: mockAccountRetrieve,
+    },
+    accountLinks: {
+      create: vi.fn().mockResolvedValue({ url: "https://connect.stripe.com/setup/test" }),
+    },
+  },
+}));
 
 const app = getApp();
 
@@ -18,12 +38,17 @@ afterAll(async () => {
 beforeEach(async () => {
   await cleanDb();
 
-  // Create a seller user for tests
+  // Create a seller user and onboard them
   const res = await request(app)
     .post("/api/v1/auth/register")
     .send({ email: "seller@example.com", password: "password123", name: "Seller" });
   sellerToken = res.body.accessToken;
   sellerId = res.body.user.id;
+
+  // Onboard the seller (so they can create listings)
+  await request(app)
+    .post("/api/v1/seller/onboard")
+    .set("Authorization", `Bearer ${sellerToken}`);
 });
 
 describe("POST /api/v1/listings", () => {
@@ -282,6 +307,42 @@ describe("GET /api/v1/listings/mine", () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].status).toBe("sold");
+  });
+});
+
+describe("onboarding guard", () => {
+  it("blocks listing creation when seller is not onboarded", async () => {
+    // Register a new seller who has NOT been onboarded
+    const notOnboarded = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "newbie@example.com", password: "password123", name: "New Seller" });
+
+    const res = await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${notOnboarded.body.accessToken}`)
+      .send({ title: "Blocked", description: "Should fail", price: 10, category: "Books", condition: "New" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("ONBOARDING_REQUIRED");
+  });
+
+  it("allows listing creation after onboarding", async () => {
+    // Register and onboard a seller
+    const register = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "ready@example.com", password: "password123", name: "Ready Seller" });
+    const token = `Bearer ${register.body.accessToken}`;
+
+    await request(app)
+      .post("/api/v1/seller/onboard")
+      .set("Authorization", token);
+
+    const res = await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", token)
+      .send({ title: "Allowed", description: "Should work", price: 10, category: "Books", condition: "New" });
+
+    expect(res.status).toBe(201);
   });
 });
 
