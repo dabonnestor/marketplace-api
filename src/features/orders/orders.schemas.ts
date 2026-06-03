@@ -10,6 +10,4 @@ export const listOrdersSchema = z.object({
   status: z.string().optional(),
 });
 
-export const PLATFORM_FEE_PERCENT = 10; // 10% commission
-
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;

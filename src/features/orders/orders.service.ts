@@ -4,7 +4,7 @@ import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../../sh
 import Stripe from "stripe";
 import { ensureParticipant } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
-import { PLATFORM_FEE_PERCENT } from "./orders.schemas.js";
+import { calculateOrderBreakdown } from "./commission.js";
 import { transition, type OrderStatus } from "./state-machine.js";
 import { stripe } from "../payments/stripe-client.js";
 import { toCents } from "../payments/amount-utils.js";
@@ -46,9 +46,7 @@ export async function createOrder(buyerId: string, listingId: string) {
 
   const subtotal = Number(listing.price);
   const shippingCost = Number(listing.shippingCost);
-  const platformFee = Math.round((subtotal * PLATFORM_FEE_PERCENT) / 100 * 100) / 100;
-  const total = subtotal + shippingCost;
-  const sellerPayout = total - platformFee;
+  const { platformFee, total, sellerPayout } = calculateOrderBreakdown(subtotal, shippingCost);
 
   const [order] = await db
     .insert(schema.orders)
