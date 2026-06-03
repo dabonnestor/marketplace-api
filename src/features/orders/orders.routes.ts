@@ -3,6 +3,7 @@ import { authenticate } from "../../shared/middleware/auth.js";
 import { validate } from "../../shared/middleware/validate.js";
 import { asyncHandler } from "../../shared/middleware/async-handler.js";
 import { createOrderSchema, listOrdersSchema } from "./orders.schemas.js";
+import { AppError } from "../../shared/errors.js";
 import * as ordersService from "./orders.service.js";
 
 export const ordersRouter = Router();
@@ -53,6 +54,9 @@ ordersRouter.get("/:id", asyncHandler(async (req, res) => {
 // Transition order status
 ordersRouter.patch("/:id/status", asyncHandler(async (req, res) => {
   const { status } = req.body;
+  if (status === "paid" || status === "cancelled") {
+    throw new AppError(400, "TRANSITION_REMOVED", `Use POST /api/v1/orders/:id/${status === "paid" ? "pay" : "cancel"} instead`);
+  }
   const order = await ordersService.transitionStatus(req.params.id as string, status, req.user!.sub);
   res.json(order);
 }));

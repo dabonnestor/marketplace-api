@@ -3,6 +3,7 @@ import request from "supertest";
 import { setupDb, cleanDb, closeDb, getApp, getDb } from "./helpers.js";
 import { orders } from "../db/schema.js";
 import { sql } from "drizzle-orm";
+import Stripe from "stripe";
 
 vi.mock("../features/payments/stripe-client.js", () => ({
   stripe: {
@@ -299,6 +300,80 @@ describe("POST /api/v1/orders/:id/pay", () => {
 
     expect(res.status).toBe(401);
   });
+
+  it("returns 402 when card is declined", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const { stripe } = await import("../features/payments/stripe-client.js");
+    const cardError = Object.assign(
+      Object.create(Stripe.errors.StripeCardError.prototype),
+      {
+        type: "card_error",
+        statusCode: 402,
+        decline_code: "generic_decline",
+        message: "Your card was declined",
+      },
+    );
+    vi.mocked(stripe.paymentIntents.confirm).mockRejectedValueOnce(cardError);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(402);
+    expect(res.body.error.code).toBe("PAYMENT_FAILED");
+  });
+
+  it("returns 502 on Stripe API error", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const { stripe } = await import("../features/payments/stripe-client.js");
+    const apiError = Object.assign(
+      Object.create(Stripe.errors.StripeAPIError.prototype),
+      {
+        type: "api_error",
+        statusCode: 500,
+        message: "Stripe API error",
+      },
+    );
+    vi.mocked(stripe.paymentIntents.confirm).mockRejectedValueOnce(apiError);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe("PAYMENT_SERVICE_UNAVAILABLE");
+  });
+
+  it("returns 400 when paying a non-pending order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Pay once
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    // Pay again — should fail
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
 });
 
 describe("POST /api/v1/orders/:id/cancel", () => {
@@ -375,6 +450,27 @@ describe("POST /api/v1/orders/:id/cancel", () => {
 
     expect(res.status).toBe(401);
   });
+
+  it("returns 400 when cancelling a non-pending order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Cancel once
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    // Cancel again — should fail
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
 });
 
 describe("Order state machine", () => {
@@ -389,11 +485,10 @@ describe("Order state machine", () => {
     const orderId = order.body.id;
     expect(order.body.status).toBe("pending");
 
-    // Buyer marks as paid
+    // Buyer pays through dedicated endpoint
     const paid = await request(app)
-      .patch(`/api/v1/orders/${orderId}/status`)
-      .set("Authorization", `Bearer ${buyerToken}`)
-      .send({ status: "paid" });
+      .post(`/api/v1/orders/${orderId}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
     expect(paid.status).toBe(200);
     expect(paid.body.status).toBe("paid");
     expect(paid.body.paidAt).toBeDefined();
@@ -449,13 +544,50 @@ describe("Order state machine", () => {
       .set("Authorization", `Bearer ${buyerToken}`)
       .send({ listingId: listing.id });
 
-    // Seller can't mark as paid (only buyer can)
+    // Pay first so order is in "paid" status
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    // Buyer can't mark as shipped (only seller can)
     const res = await request(app)
       .patch(`/api/v1/orders/${order.body.id}/status`)
-      .set("Authorization", `Bearer ${sellerToken}`)
-      .send({ status: "paid" });
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ status: "shipped" });
 
     expect(res.status).toBe(403);
+  });
+
+  it("rejects paid transition through PATCH status endpoint (use dedicated pay endpoint)", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .patch(`/api/v1/orders/${order.body.id}/status`)
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ status: "paid" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("TRANSITION_REMOVED");
+  });
+
+  it("rejects cancelled transition through PATCH status endpoint (use dedicated cancel endpoint)", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .patch(`/api/v1/orders/${order.body.id}/status`)
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ status: "cancelled" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("TRANSITION_REMOVED");
   });
 
   it("completed orders cannot be modified", async () => {
@@ -546,9 +678,8 @@ describe("GET buyer/seller order lists", () => {
 
     // Move one order to paid
     await request(app)
-      .patch(`/api/v1/orders/${order.body.id}/status`)
-      .set("Authorization", `Bearer ${buyerToken}`)
-      .send({ status: "paid" });
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
 
     const res = await request(app)
       .get("/api/v1/orders/buyer/purchases?status=paid")
