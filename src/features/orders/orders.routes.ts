@@ -5,6 +5,7 @@ import { asyncHandler } from "../../shared/middleware/async-handler.js";
 import { createOrderSchema, listOrdersSchema } from "./orders.schemas.js";
 import { AppError } from "../../shared/errors.js";
 import * as ordersService from "./orders.service.js";
+import { completeOrder } from "./complete-order.js";
 
 export const ordersRouter = Router();
 
@@ -22,6 +23,12 @@ ordersRouter.post("/:id/pay", asyncHandler(async (req, res) => {
 // Buyer: cancel an order
 ordersRouter.post("/:id/cancel", asyncHandler(async (req, res) => {
   const order = await ordersService.cancelOrder(req.params.id as string, req.user!.sub);
+  res.json(order);
+}));
+
+// Buyer: complete an order (mark as received)
+ordersRouter.post("/:id/complete", asyncHandler(async (req, res) => {
+  const order = await completeOrder(req.params.id as string, req.user!.sub);
   res.json(order);
 }));
 
@@ -60,8 +67,8 @@ ordersRouter.get("/:id", asyncHandler(async (req, res) => {
 // Transition order status
 ordersRouter.patch("/:id/status", asyncHandler(async (req, res) => {
   const { status } = req.body;
-  if (status === "paid" || status === "cancelled" || status === "refunded") {
-    throw new AppError(400, "TRANSITION_REMOVED", `Use POST /api/v1/orders/:id/${status === "paid" ? "pay" : status === "cancelled" ? "cancel" : "refund"} instead`);
+  if (status === "paid" || status === "cancelled" || status === "refunded" || status === "completed") {
+    throw new AppError(400, "TRANSITION_REMOVED", `Use POST /api/v1/orders/:id/${status === "paid" ? "pay" : status === "cancelled" ? "cancel" : status === "refunded" ? "refund" : "complete"} instead`);
   }
   const order = await ordersService.transitionStatus(req.params.id as string, status, req.user!.sub);
   res.json(order);
