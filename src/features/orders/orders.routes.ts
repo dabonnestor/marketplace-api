@@ -12,6 +12,18 @@ ordersRouter.use(authenticate);
 
 // Specific routes must come before /:id param routes
 
+// Buyer: pay for an order
+ordersRouter.post("/:id/pay", asyncHandler(async (req, res) => {
+  const order = await ordersService.payOrder(req.params.id as string, req.user!.sub);
+  res.json(order);
+}));
+
+// Buyer: cancel an order
+ordersRouter.post("/:id/cancel", asyncHandler(async (req, res) => {
+  const order = await ordersService.cancelOrder(req.params.id as string, req.user!.sub);
+  res.json(order);
+}));
+
 // Buyer: list my purchases
 ordersRouter.get("/buyer/purchases", validate(listOrdersSchema, "query"), asyncHandler(async (req, res) => {
   const { page, limit, status } = req.query as any;
