@@ -26,3 +26,38 @@ export async function getPendingOrderOnListing(listingId: string) {
     .limit(1);
   return order ?? null;
 }
+
+export async function expireIfStale(order: {
+  id: string;
+  listingId: string;
+  status: string;
+  createdAt: Date;
+}): Promise<boolean> {
+  if (order.status === "pending" && isOrderExpired(order.createdAt)) {
+    await expireOrderAndReleaseListing(order.id, order.listingId);
+    return true;
+  }
+  return false;
+}
+
+export async function resolveListingReservation(listingId: string): Promise<string> {
+  const [listing] = await db
+    .select()
+    .from(schema.listings)
+    .where(eq(schema.listings.id, listingId))
+    .limit(1);
+
+  if (!listing) {
+    return "not_found";
+  }
+
+  if (listing.status === "reserved") {
+    const pendingOrder = await getPendingOrderOnListing(listingId);
+    if (pendingOrder && isOrderExpired(pendingOrder.createdAt)) {
+      await expireOrderAndReleaseListing(pendingOrder.id, listingId);
+      return "active";
+    }
+  }
+
+  return listing.status;
+}
