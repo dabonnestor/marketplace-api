@@ -527,9 +527,8 @@ describe("Order state machine", () => {
 
     // Buyer confirms and completes
     const completed = await request(app)
-      .patch(`/api/v1/orders/${orderId}/status`)
-      .set("Authorization", `Bearer ${buyerToken}`)
-      .send({ status: "completed" });
+      .post(`/api/v1/orders/${orderId}/complete`)
+      .set("Authorization", `Bearer ${buyerToken}`);
     expect(completed.status).toBe(200);
     expect(completed.body.status).toBe("completed");
   });
@@ -640,7 +639,7 @@ describe("Order state machine", () => {
     await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${buyerToken}`).send({ status: "paid" });
     await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${sellerToken}`).send({ status: "shipped" });
     await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${sellerToken}`).send({ status: "delivered" });
-    await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${buyerToken}`).send({ status: "completed" });
+    await request(app).post(`/api/v1/orders/${id}/complete`).set("Authorization", `Bearer ${buyerToken}`);
 
     // Try to modify completed order
     const res = await request(app)
@@ -677,9 +676,8 @@ describe("completed transfer", () => {
 
       // Buyer completes — should trigger Stripe transfer
       const completed = await request(app)
-        .patch(`/api/v1/orders/${id}/status`)
-        .set("Authorization", `Bearer ${buyerToken}`)
-        .send({ status: "completed" });
+        .post(`/api/v1/orders/${id}/complete`)
+        .set("Authorization", `Bearer ${buyerToken}`);
 
       expect(completed.status).toBe(200);
       expect(completed.body.status).toBe("completed");
@@ -735,9 +733,8 @@ describe("completed transfer", () => {
       vi.mocked(stripe.transfers.create).mockRejectedValueOnce(apiError);
 
       const completed = await request(app)
-        .patch(`/api/v1/orders/${id}/status`)
-        .set("Authorization", `Bearer ${buyerToken}`)
-        .send({ status: "completed" });
+        .post(`/api/v1/orders/${id}/complete`)
+        .set("Authorization", `Bearer ${buyerToken}`);
 
       expect(completed.status).toBe(502);
       expect(completed.body.error.code).toBe("TRANSFER_FAILED");
@@ -950,7 +947,7 @@ describe("POST /api/v1/orders/:id/refund", () => {
     await request(app).post(`/api/v1/orders/${id}/pay`).set("Authorization", `Bearer ${buyerToken}`);
     await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${sellerToken}`).send({ status: "shipped" });
     await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${sellerToken}`).send({ status: "delivered" });
-    await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${buyerToken}`).send({ status: "completed" });
+    await request(app).post(`/api/v1/orders/${id}/complete`).set("Authorization", `Bearer ${buyerToken}`);
 
     const res = await request(app)
       .post(`/api/v1/orders/${id}/refund`)
