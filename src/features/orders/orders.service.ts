@@ -8,7 +8,7 @@ import { transition, type OrderStatus } from "./state-machine.js";
 import { stripe } from "../payments/stripe-client.js";
 import { toCents } from "../payments/amount-utils.js";
 import { mapStripeError } from "../payments/error-mapping.js";
-import { isOrderExpired, expireOrderAndReleaseListing, getPendingOrderOnListing } from "./expiry.js";
+import { resolveListingReservation, expireIfStale } from "./expiry.js";
 
 export async function createOrGetPaymentIntent(order: {
   id: string;
@@ -60,20 +60,14 @@ export async function createOrder(buyerId: string, listingId: string) {
     throw new NotFoundError("Listing", listingId);
   }
 
-  if (listing.status === "reserved") {
-    const pendingOrder = await getPendingOrderOnListing(listingId);
-    if (pendingOrder) {
-      if (isOrderExpired(pendingOrder.createdAt)) {
-        await expireOrderAndReleaseListing(pendingOrder.id, listingId);
-        listing.status = "active";
-      } else {
-        throw new ConflictError("This listing already has a pending order");
-      }
-    }
+  const effectiveStatus = await resolveListingReservation(listingId);
+
+  if (effectiveStatus === "reserved") {
+    throw new ConflictError("This listing already has a pending order");
   }
 
-  if (listing.status !== "active") {
-    throw new AppError(400, "LISTING_NOT_AVAILABLE", `Cannot order this listing (status: ${listing.status})`);
+  if (effectiveStatus !== "active") {
+    throw new AppError(400, "LISTING_NOT_AVAILABLE", `Cannot order this listing (status: ${effectiveStatus})`);
   }
 
   if (listing.sellerId === buyerId) {
@@ -126,8 +120,7 @@ export async function payOrder(orderId: string, userId: string) {
   }
 
   // Lazy expiry: if pending and expired, transition to expired and release listing
-  if (order.status === "pending" && isOrderExpired(order.createdAt)) {
-    await expireOrderAndReleaseListing(orderId, order.listingId);
+  if (await expireIfStale(order)) {
     throw new AppError(400, "ORDER_EXPIRED", "This order has expired and can no longer be paid");
   }
 
@@ -162,8 +155,7 @@ export async function cancelOrder(orderId: string, userId: string) {
   }
 
   // Lazy expiry: if pending and expired, transition to expired instead of cancelled
-  if (order.status === "pending" && isOrderExpired(order.createdAt)) {
-    await expireOrderAndReleaseListing(orderId, order.listingId);
+  if (await expireIfStale(order)) {
     const [refreshed] = await db
       .select()
       .from(schema.orders)
