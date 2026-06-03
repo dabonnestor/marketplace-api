@@ -37,7 +37,7 @@ const ROLE_RESTRICTIONS: Record<string, OrderRole> = {
   refunded: "buyer",
 };
 
-export function transition(from: OrderStatus, to: OrderStatus, role: OrderRole, preDisputeStatus?: OrderStatus): TransitionResult {
+export function transition(from: OrderStatus, to: OrderStatus, role?: OrderRole, preDisputeStatus?: OrderStatus): TransitionResult {
   const allowedTargets = VALID_TRANSITIONS[from];
   const isAllowed = allowedTargets.includes(to) || (from === "disputed" && preDisputeStatus === to);
 
@@ -49,14 +49,16 @@ export function transition(from: OrderStatus, to: OrderStatus, role: OrderRole, 
     };
   }
 
-  const requiredRole = ROLE_RESTRICTIONS[to];
-  if (requiredRole && role !== requiredRole) {
-    const label = requiredRole === "buyer" ? "Only the buyer" : "Only the seller";
-    return {
-      allowed: false,
-      error: `${label} can mark the order as ${to}`,
-      errorCode: "FORBIDDEN",
-    };
+  if (role) {
+    const requiredRole = ROLE_RESTRICTIONS[to];
+    if (requiredRole && role !== requiredRole) {
+      const label = requiredRole === "buyer" ? "Only the buyer" : "Only the seller";
+      return {
+        allowed: false,
+        error: `${label} can mark the order as ${to}`,
+        errorCode: "FORBIDDEN",
+      };
+    }
   }
 
   return {

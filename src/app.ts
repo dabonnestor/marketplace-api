@@ -10,6 +10,7 @@ import { authRouter } from "./features/auth/auth.routes.js";
 import { listingsRouter } from "./features/listings/listings.routes.js";
 import { ordersRouter } from "./features/orders/orders.routes.js";
 import { sellerRouter } from "./features/seller/seller.routes.js";
+import { webhooksRouter } from "./features/webhooks/webhooks.routes.js";
 import { openApiSpec } from "./shared/openapi.js";
 
 export function createApp() {
@@ -29,6 +30,9 @@ export function createApp() {
     }),
   );
   app.use(cors());
+
+  // Raw body parsing for Stripe webhooks (before JSON parser)
+  app.use("/api/v1/webhooks", express.raw({ type: "application/json" }));
   app.use(express.json({ limit: "1mb" }));
 
   // Logging
@@ -65,7 +69,8 @@ export function createApp() {
   app.use("/api/v1/auth", authLimiter, authRouter);
   app.use("/api/v1/listings", listingsRouter);
   app.use("/api/v1/orders", ordersRouter);
-app.use("/api/v1/seller", sellerRouter);
+  app.use("/api/v1/seller", sellerRouter);
+  app.use("/api/v1/webhooks", webhooksRouter);
 
   // Error handler (must be last)
   app.use(errorHandler);
