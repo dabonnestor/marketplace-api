@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { db, schema } from "../../db/index.js";
 import { logger } from "../../shared/logger.js";
 import { transition, type OrderStatus } from "../orders/state-machine.js";
+import { executeTransition } from "../orders/orders.service.js";
 
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {
@@ -58,15 +59,7 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
     return;
   }
 
-  const updates: Record<string, unknown> = { status: "paid", updatedAt: new Date() };
-  if (result.timestampField) {
-    updates[result.timestampField] = new Date();
-  }
-
-  await db
-    .update(schema.orders)
-    .set(updates)
-    .where(eq(schema.orders.id, orderId));
+  await executeTransition(orderId, "paid", result);
 
   logger.info({ orderId }, "Order marked as paid via webhook (safety net)");
 }
@@ -92,14 +85,7 @@ async function handleDisputeCreated(dispute: Stripe.Dispute) {
     return;
   }
 
-  await db
-    .update(schema.orders)
-    .set({
-      status: "disputed",
-      preDisputeStatus: currentStatus,
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.orders.id, order.id));
+  await executeTransition(order.id, "disputed", result, { preDisputeStatus: currentStatus });
 
   logger.info({ orderId: order.id, preDisputeStatus: currentStatus }, "Order transitioned to disputed via webhook");
 }
@@ -134,14 +120,7 @@ async function handleDisputeClosed(dispute: Stripe.Dispute) {
       return;
     }
 
-    await db
-      .update(schema.orders)
-      .set({
-        status: preDisputeStatus,
-        preDisputeStatus: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, order.id));
+    await executeTransition(order.id, preDisputeStatus, result, { preDisputeStatus: null });
 
     logger.info({ orderId: order.id, restoredStatus: preDisputeStatus }, "Order reverted from disputed via webhook (dispute won)");
   } else if (disputeStatus === "lost") {
@@ -152,15 +131,7 @@ async function handleDisputeClosed(dispute: Stripe.Dispute) {
       return;
     }
 
-    const updates: Record<string, unknown> = { status: "refunded", updatedAt: new Date() };
-    if (result.timestampField) {
-      updates[result.timestampField] = new Date();
-    }
-
-    await db
-      .update(schema.orders)
-      .set(updates)
-      .where(eq(schema.orders.id, order.id));
+    await executeTransition(order.id, "refunded", result);
 
     logger.info({ orderId: order.id }, "Order transitioned to refunded via webhook (dispute lost)");
   }

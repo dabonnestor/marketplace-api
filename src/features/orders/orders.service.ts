@@ -208,6 +208,30 @@ export async function getOrder(orderId: string, userId: string) {
   return order;
 }
 
+export async function executeTransition(
+  orderId: string,
+  newStatus: OrderStatus,
+  result: { allowed: boolean; timestampField?: string },
+  extraUpdates?: Record<string, unknown>,
+) {
+  const updates: Record<string, unknown> = {
+    status: newStatus,
+    updatedAt: new Date(),
+    ...extraUpdates,
+  };
+  if (result.timestampField) {
+    updates[result.timestampField] = new Date();
+  }
+
+  const [updated] = await db
+    .update(schema.orders)
+    .set(updates)
+    .where(eq(schema.orders.id, orderId))
+    .returning();
+
+  return updated;
+}
+
 export async function transitionStatus(
   orderId: string,
   newStatus: OrderStatus,
@@ -226,18 +250,7 @@ export async function transitionStatus(
     throw new AppError(400, result.errorCode ?? "INVALID_TRANSITION", result.error!);
   }
 
-  const updates: Record<string, unknown> = { status: newStatus, updatedAt: new Date() };
-  if (result.timestampField) {
-    updates[result.timestampField] = new Date();
-  }
-
-  const [updated] = await db
-    .update(schema.orders)
-    .set(updates)
-    .where(eq(schema.orders.id, orderId))
-    .returning();
-
-  return updated;
+  return executeTransition(orderId, newStatus, result);
 }
 
 export async function listBuyerOrders(buyerId: string, page: number, limit: number, status?: string) {
