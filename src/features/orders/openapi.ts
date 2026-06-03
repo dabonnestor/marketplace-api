@@ -17,6 +17,7 @@ const orderSchema = {
     stripePaymentIntentId: { type: "string" },
     stripeTransferId: { type: "string" },
     stripeRefundId: { type: "string" },
+    preDisputeStatus: { type: "string", enum: ["pending", "paid", "shipped", "delivered", "completed", "disputed", "cancelled", "expired", "refunded"] },
     paidAt: { type: "string", format: "date-time" },
     shippedAt: { type: "string", format: "date-time" },
     deliveredAt: { type: "string", format: "date-time" },
@@ -27,9 +28,18 @@ const orderSchema = {
   },
 };
 
+const orderCreatedSchema = {
+  ...orderSchema,
+  properties: {
+    ...orderSchema.properties,
+    clientSecret: { type: "string" },
+  },
+};
+
 export const orderSchemas = {
   CreateOrderRequest: zodToJsonSchema(createOrderSchema) as any,
   Order: orderSchema,
+  OrderCreated: orderCreatedSchema,
 };
 
 export const orderPaths = {
@@ -42,7 +52,7 @@ export const orderPaths = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/CreateOrderRequest" } } },
       },
       responses: {
-        "201": { description: "Order created", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } },
+        "201": { description: "Order created with PaymentIntent client secret for frontend confirmation", content: { "application/json": { schema: { $ref: "#/components/schemas/OrderCreated" } } } },
         "400": { description: "Validation error or self-purchase" },
         "401": { description: "Not authenticated" },
         "404": { description: "Listing not found" },
@@ -120,7 +130,7 @@ export const orderPaths = {
       tags: ["Orders"],
       summary: "Transition order status",
       description:
-        "State machine: pending → paid (buyer) → shipped (seller) → delivered (seller) → completed (buyer). Completing an order triggers a Stripe transfer to the seller. Disputed and cancelled are also valid from certain states.",
+        "State machine: paid → shipped (seller) → delivered (seller) → completed (buyer). Completing an order triggers a Stripe transfer to the seller. Disputed is also valid from certain states. The transitions `paid`, `cancelled`, and `refunded` must use their dedicated endpoints (POST /pay, POST /cancel, POST /refund).",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
       requestBody: {
         required: true,
@@ -132,7 +142,7 @@ export const orderPaths = {
               properties: {
                 status: {
                   type: "string",
-                  enum: ["paid", "shipped", "delivered", "completed", "disputed", "cancelled"],
+                  enum: ["shipped", "delivered", "completed", "disputed"],
                 },
               },
             },
@@ -159,6 +169,39 @@ export const orderPaths = {
         "401": { description: "Not authenticated" },
         "403": { description: "Not the buyer" },
         "502": { description: "Stripe API error" },
+      },
+    },
+  },
+  "/api/v1/orders/{id}/pay": {
+    post: {
+      tags: ["Orders"],
+      summary: "Pay for an order (buyer only)",
+      description: "Confirms the Stripe PaymentIntent and transitions the order to paid. If the PaymentIntent was not created at order time, it is lazily created here.",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+      responses: {
+        "200": { description: "Order paid", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } },
+        "400": { description: "Order expired or invalid transition" },
+        "401": { description: "Not authenticated" },
+        "402": { description: "PAYMENT_FAILED — card declined or payment refused" },
+        "403": { description: "Not the buyer" },
+        "404": { description: "Order not found" },
+        "502": { description: "PAYMENT_SERVICE_UNAVAILABLE — Stripe API error" },
+      },
+    },
+  },
+  "/api/v1/orders/{id}/cancel": {
+    post: {
+      tags: ["Orders"],
+      summary: "Cancel a pending order (buyer only)",
+      description: "Cancels the Stripe PaymentIntent if one exists and releases the listing back to active.",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+      responses: {
+        "200": { description: "Order cancelled", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } },
+        "400": { description: "Invalid transition" },
+        "401": { description: "Not authenticated" },
+        "403": { description: "Not the buyer" },
+        "404": { description: "Order not found" },
+        "502": { description: "Stripe API error when cancelling PaymentIntent" },
       },
     },
   },
