@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import request from "supertest";
-import { setupDb, cleanDb, closeDb, getApp } from "./helpers.js";
+import { setupDb, cleanDb, closeDb, getApp, getDb } from "./helpers.js";
+import { orders } from "../db/schema.js";
+import { sql } from "drizzle-orm";
 
 const { mockAccountRetrieve } = vi.hoisted(() => ({
   mockAccountRetrieve: vi.fn().mockResolvedValue({
@@ -18,6 +20,12 @@ vi.mock("../features/payments/stripe-client.js", () => ({
     },
     accountLinks: {
       create: vi.fn().mockResolvedValue({ url: "https://connect.stripe.com/setup/test" }),
+    },
+    paymentIntents: {
+      create: vi.fn().mockResolvedValue({
+        id: "pi_test123",
+        client_secret: "pi_test123_secret_test",
+      }),
     },
   },
 }));
@@ -190,6 +198,39 @@ describe("GET /api/v1/listings/:id", () => {
     const res = await request(app).get("/api/v1/listings/00000000-0000-0000-0000-000000000000");
     expect(res.status).toBe(404);
   });
+
+  it("releases a reserved listing when its pending order has expired", async () => {
+    const create = await request(app)
+      .post("/api/v1/listings")
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ title: "Expire Test", description: "Test", price: 50, category: "Books", condition: "New" });
+    const listingId = create.body.id;
+
+    // Buyer creates an order
+    const buyerRes = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "expbuyer@example.com", password: "password123", name: "Expiry Buyer" });
+
+    const orderRes = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerRes.body.accessToken}`)
+      .send({ listingId });
+    expect(orderRes.status).toBe(201);
+
+    // Backdate order to >30 minutes ago
+    const EXPIRY_MINUTES = 30;
+    const expiredDate = new Date(Date.now() - (EXPIRY_MINUTES + 1) * 60 * 1000);
+    const db = getDb();
+    await db
+      .update(orders)
+      .set({ createdAt: expiredDate })
+      .where(sql`id = ${orderRes.body.id}`);
+
+    // Fetching the listing should release it
+    const get = await request(app).get(`/api/v1/listings/${listingId}`);
+    expect(get.status).toBe(200);
+    expect(get.body.status).toBe("active");
+  });
 });
 
 describe("PATCH /api/v1/listings/:id", () => {
@@ -283,14 +324,14 @@ describe("GET /api/v1/listings/mine", () => {
     expect(res.body.data[0].title).toBe("Seller Item");
   });
 
-  it("includes sold listings", async () => {
+  it("includes reserved listings", async () => {
     // Create a listing
     const create = await request(app)
       .post("/api/v1/listings")
       .set("Authorization", `Bearer ${sellerToken}`)
       .send({ title: "For Sale", description: "Buy me", price: 50, category: "Books", condition: "New" });
 
-    // Mark it as sold directly via a buyer purchasing it
+    // Mark it as reserved via a buyer purchasing it
     const buyer = await request(app)
       .post("/api/v1/auth/register")
       .send({ email: "buyer@example.com", password: "password123", name: "Buyer" });
@@ -306,7 +347,7 @@ describe("GET /api/v1/listings/mine", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].status).toBe("sold");
+    expect(res.body.data[0].status).toBe("reserved");
   });
 });
 

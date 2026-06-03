@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import request from "supertest";
-import { setupDb, cleanDb, closeDb, getApp } from "./helpers.js";
+import { setupDb, cleanDb, closeDb, getApp, getDb } from "./helpers.js";
+import { orders } from "../db/schema.js";
+import { sql } from "drizzle-orm";
 
 vi.mock("../features/payments/stripe-client.js", () => ({
   stripe: {
@@ -14,6 +16,20 @@ vi.mock("../features/payments/stripe-client.js", () => ({
     },
     accountLinks: {
       create: vi.fn().mockResolvedValue({ url: "https://connect.stripe.com/setup/test" }),
+    },
+    paymentIntents: {
+      create: vi.fn().mockResolvedValue({
+        id: "pi_test123",
+        client_secret: "pi_test123_secret_test",
+      }),
+      confirm: vi.fn().mockResolvedValue({
+        id: "pi_test123",
+        status: "succeeded",
+      }),
+      cancel: vi.fn().mockResolvedValue({
+        id: "pi_test123",
+        status: "canceled",
+      }),
     },
   },
 }));
@@ -88,6 +104,8 @@ describe("POST /api/v1/orders", () => {
     expect(res.body.total).toBe("105.00");
     expect(res.body.platformFee).toBe("10.00"); // 10% of $100
     expect(res.body.sellerPayout).toBe("95.00"); // $105 - $10
+    expect(res.body.stripePaymentIntentId).toBe("pi_test123");
+    expect(res.body.clientSecret).toBe("pi_test123_secret_test");
   });
 
   it("prevents self-purchase", async () => {
@@ -111,7 +129,7 @@ describe("POST /api/v1/orders", () => {
     expect(res.status).toBe(404);
   });
 
-  it("marks listing as sold after order creation", async () => {
+  it("marks listing as reserved after order creation", async () => {
     const listing = await createListing();
 
     await request(app)
@@ -122,7 +140,7 @@ describe("POST /api/v1/orders", () => {
     const get = await request(app).get(`/api/v1/listings/${listing.id}`);
 
     expect(get.status).toBe(200);
-    expect(get.body.status).toBe("sold");
+    expect(get.body.status).toBe("reserved");
   });
 
   it("requires auth", async () => {
@@ -131,6 +149,229 @@ describe("POST /api/v1/orders", () => {
     const res = await request(app)
       .post("/api/v1/orders")
       .send({ listingId: listing.id });
+
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 409 when creating a second order on a reserved listing", async () => {
+    const listing = await createListing();
+
+    // First order succeeds
+    const first = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+    expect(first.status).toBe(201);
+
+    // Register a second buyer
+    const secondBuyerRes = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "buyer2@example.com", password: "password123", name: "Buyer 2" });
+    const secondBuyerToken = secondBuyerRes.body.accessToken;
+
+    // Second order on same listing should conflict
+    const second = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${secondBuyerToken}`)
+      .send({ listingId: listing.id });
+
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe("CONFLICT");
+  });
+
+  it("allows a new order on a listing whose pending order has expired", async () => {
+    const listing = await createListing();
+
+    // First order succeeds
+    const first = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+    expect(first.status).toBe(201);
+    const firstOrderId = first.body.id;
+
+    // Backdate the first order's createdAt to >30 minutes ago
+    const EXPIRY_MINUTES = 30;
+    const expiredDate = new Date(Date.now() - (EXPIRY_MINUTES + 1) * 60 * 1000);
+    const db = getDb();
+    await db
+      .update(orders)
+      .set({ createdAt: expiredDate })
+      .where(sql`id = ${firstOrderId}`);
+
+    // Register a second buyer
+    const secondBuyerRes = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: "buyer2@example.com", password: "password123", name: "Buyer 2" });
+    const secondBuyerToken = secondBuyerRes.body.accessToken;
+
+    // Second order should succeed because the first order expired
+    const second = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${secondBuyerToken}`)
+      .send({ listingId: listing.id });
+
+    expect(second.status).toBe(201);
+    expect(second.body.stripePaymentIntentId).toBeDefined();
+
+    // Verify the old order was expired
+    const oldOrder = await request(app)
+      .get(`/api/v1/orders/${firstOrderId}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+    expect(oldOrder.body.status).toBe("expired");
+  });
+});
+
+describe("POST /api/v1/orders/:id/pay", () => {
+  it("pays a pending order and confirms the PaymentIntent", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("paid");
+    expect(res.body.paidAt).toBeDefined();
+  });
+
+  it("rejects payment from a non-buyer", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${sellerToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("expires an expired pending order when paying", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Backdate the order
+    const EXPIRY_MINUTES = 30;
+    const expiredDate = new Date(Date.now() - (EXPIRY_MINUTES + 1) * 60 * 1000);
+    const db = getDb();
+    await db
+      .update(orders)
+      .set({ createdAt: expiredDate })
+      .where(sql`id = ${order.body.id}`);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("ORDER_EXPIRED");
+
+    // Verify order is expired
+    const getOrder = await request(app)
+      .get(`/api/v1/orders/${order.body.id}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+    expect(getOrder.body.status).toBe("expired");
+
+    // Verify listing is released
+    const getListing = await request(app).get(`/api/v1/listings/${listing.id}`);
+    expect(getListing.body.status).toBe("active");
+  });
+
+  it("requires auth", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`);
+
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("POST /api/v1/orders/:id/cancel", () => {
+  it("cancels a pending order and releases the listing", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("cancelled");
+
+    // Listing should be released
+    const getListing = await request(app).get(`/api/v1/listings/${listing.id}`);
+    expect(getListing.body.status).toBe("active");
+  });
+
+  it("rejects cancellation from a non-buyer", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`)
+      .set("Authorization", `Bearer ${sellerToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("expires an expired pending order when cancelling", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Backdate the order
+    const EXPIRY_MINUTES = 30;
+    const expiredDate = new Date(Date.now() - (EXPIRY_MINUTES + 1) * 60 * 1000);
+    const db = getDb();
+    await db
+      .update(orders)
+      .set({ createdAt: expiredDate })
+      .where(sql`id = ${order.body.id}`);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("expired");
+
+    // Listing should be released
+    const getListing = await request(app).get(`/api/v1/listings/${listing.id}`);
+    expect(getListing.body.status).toBe("active");
+  });
+
+  it("requires auth", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`);
 
     expect(res.status).toBe(401);
   });
