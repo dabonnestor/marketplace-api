@@ -1,21 +1,41 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { NotFoundError, ForbiddenError, AppError } from "../../shared/errors.js";
+import { NotFoundError, ForbiddenError, AppError, ConflictError } from "../../shared/errors.js";
 import { ensureParticipant } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
 import { PLATFORM_FEE_PERCENT } from "./orders.schemas.js";
 import { transition, type OrderStatus } from "./state-machine.js";
+import { stripe } from "../payments/stripe-client.js";
+import { toCents } from "../payments/amount-utils.js";
+import { mapStripeError } from "../payments/error-mapping.js";
+import { isOrderExpired, expireOrderAndReleaseListing, getPendingOrderOnListing } from "./expiry.js";
 
 export async function createOrder(buyerId: string, listingId: string) {
-  // Verify listing exists and is active
+  // Verify listing exists
   const [listing] = await db
     .select()
     .from(schema.listings)
-    .where(and(eq(schema.listings.id, listingId), eq(schema.listings.status, "active")))
+    .where(eq(schema.listings.id, listingId))
     .limit(1);
 
   if (!listing) {
     throw new NotFoundError("Listing", listingId);
+  }
+
+  if (listing.status === "reserved") {
+    const pendingOrder = await getPendingOrderOnListing(listingId);
+    if (pendingOrder) {
+      if (isOrderExpired(pendingOrder.createdAt)) {
+        await expireOrderAndReleaseListing(pendingOrder.id, listingId);
+        listing.status = "active";
+      } else {
+        throw new ConflictError("This listing already has a pending order");
+      }
+    }
+  }
+
+  if (listing.status !== "active") {
+    throw new AppError(400, "LISTING_NOT_AVAILABLE", `Cannot order this listing (status: ${listing.status})`);
   }
 
   if (listing.sellerId === buyerId) {
@@ -43,13 +63,135 @@ export async function createOrder(buyerId: string, listingId: string) {
     })
     .returning();
 
-  // Mark listing as sold
+  // Mark listing as reserved
   await db
     .update(schema.listings)
-    .set({ status: "sold", updatedAt: new Date() })
+    .set({ status: "reserved", updatedAt: new Date() })
     .where(eq(schema.listings.id, listingId));
 
-  return order;
+  // Create Stripe PaymentIntent
+  let clientSecret: string | undefined;
+  let stripePaymentIntentId: string | undefined;
+  try {
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: toCents(order.total),
+        currency: "usd",
+        capture_method: "automatic",
+        payment_method_types: ["card"],
+        metadata: {
+          order_id: order.id,
+          buyer_id: buyerId,
+          seller_id: listing.sellerId,
+          listing_id: listingId,
+        },
+      },
+      { idempotencyKey: order.id },
+    );
+    stripePaymentIntentId = paymentIntent.id;
+    clientSecret = paymentIntent.client_secret ?? undefined;
+
+    await db
+      .update(schema.orders)
+      .set({ stripePaymentIntentId, updatedAt: new Date() })
+      .where(eq(schema.orders.id, order.id));
+  } catch (err) {
+    // If Stripe fails, order exists without PaymentIntent.
+    // The pay endpoint will lazily create one if missing.
+    throw mapStripeError(err);
+  }
+
+  return { ...order, stripePaymentIntentId, clientSecret };
+}
+
+export async function payOrder(orderId: string, userId: string) {
+  const order = await getOrder(orderId, userId);
+
+  if (order.buyerId !== userId) {
+    throw new ForbiddenError("Only the buyer can pay for this order");
+  }
+
+  // Lazy expiry: if pending and expired, transition to expired and release listing
+  if (order.status === "pending" && isOrderExpired(order.createdAt)) {
+    await expireOrderAndReleaseListing(orderId, order.listingId);
+    throw new AppError(400, "ORDER_EXPIRED", "This order has expired and can no longer be paid");
+  }
+
+  // Confirm the PaymentIntent
+  let stripePaymentIntentId = order.stripePaymentIntentId;
+  if (!stripePaymentIntentId) {
+    // Lazily create a PaymentIntent if missing
+    try {
+      const paymentIntent = await stripe.paymentIntents.create(
+        {
+          amount: toCents(order.total),
+          currency: "usd",
+          capture_method: "automatic",
+          payment_method_types: ["card"],
+          metadata: {
+            order_id: order.id,
+            buyer_id: order.buyerId,
+            seller_id: order.sellerId,
+            listing_id: order.listingId,
+          },
+        },
+        { idempotencyKey: order.id },
+      );
+      stripePaymentIntentId = paymentIntent.id;
+      await db
+        .update(schema.orders)
+        .set({ stripePaymentIntentId, updatedAt: new Date() })
+        .where(eq(schema.orders.id, orderId));
+    } catch (err) {
+      throw mapStripeError(err);
+    }
+  }
+
+  try {
+    await stripe.paymentIntents.confirm(stripePaymentIntentId);
+  } catch (err) {
+    throw mapStripeError(err);
+  }
+
+  return transitionStatus(orderId, "paid", userId);
+}
+
+export async function cancelOrder(orderId: string, userId: string) {
+  const order = await getOrder(orderId, userId);
+
+  if (order.buyerId !== userId) {
+    throw new ForbiddenError("Only the buyer can cancel this order");
+  }
+
+  // Lazy expiry: if pending and expired, transition to expired instead of cancelled
+  if (order.status === "pending" && isOrderExpired(order.createdAt)) {
+    await expireOrderAndReleaseListing(orderId, order.listingId);
+    const [refreshed] = await db
+      .select()
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    return refreshed;
+  }
+
+  // Cancel the PaymentIntent if exists
+  if (order.stripePaymentIntentId) {
+    try {
+      await stripe.paymentIntents.cancel(order.stripePaymentIntentId);
+    } catch (err) {
+      throw mapStripeError(err);
+    }
+  }
+
+  const updated = await transitionStatus(orderId, "cancelled", userId);
+
+  // Release the listing
+  await db
+    .update(schema.listings)
+    .set({ status: "active", updatedAt: new Date() })
+    .where(eq(schema.listings.id, order.listingId));
+
+  return updated;
 }
 
 export async function getOrder(orderId: string, userId: string) {
