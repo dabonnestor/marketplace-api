@@ -15,6 +15,7 @@ const orderSchema = {
     total: { type: "string" },
     sellerPayout: { type: "string" },
     stripePaymentIntentId: { type: "string" },
+    stripeTransferId: { type: "string" },
     stripeRefundId: { type: "string" },
     paidAt: { type: "string", format: "date-time" },
     shippedAt: { type: "string", format: "date-time" },
@@ -119,7 +120,7 @@ export const orderPaths = {
       tags: ["Orders"],
       summary: "Transition order status",
       description:
-        "State machine: pending → paid (buyer) → shipped (seller) → delivered (seller) → completed (buyer). Disputed and cancelled are also valid from certain states.",
+        "State machine: pending → paid (buyer) → shipped (seller) → delivered (seller) → completed (buyer). Completing an order triggers a Stripe transfer to the seller. Disputed and cancelled are also valid from certain states.",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
       requestBody: {
         required: true,
@@ -142,6 +143,7 @@ export const orderPaths = {
         "200": { description: "Status updated", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } },
         "400": { description: "Invalid transition" },
         "403": { description: "Not authorized for this transition" },
+        "502": { description: "Stripe transfer failed" },
       },
     },
   },

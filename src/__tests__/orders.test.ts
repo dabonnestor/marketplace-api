@@ -40,6 +40,14 @@ vi.mock("../features/payments/stripe-client.js", () => ({
         payment_intent: "pi_test123",
       }),
     },
+    transfers: {
+      create: vi.fn().mockResolvedValue({
+        id: "tr_test123",
+        amount: 9500,
+        currency: "usd",
+        destination: "acct_test123",
+      }),
+    },
   },
 }));
 
@@ -643,6 +651,105 @@ describe("Order state machine", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("completed transfer", () => {
+    it("creates a Stripe transfer on completion and stores stripeTransferId", async () => {
+      const listing = await createListing();
+
+      const order = await request(app)
+        .post("/api/v1/orders")
+        .set("Authorization", `Bearer ${buyerToken}`)
+        .send({ listingId: listing.id });
+      const id = order.body.id;
+
+      // Progress to delivered
+      await request(app)
+        .post(`/api/v1/orders/${id}/pay`)
+        .set("Authorization", `Bearer ${buyerToken}`);
+      await request(app)
+        .patch(`/api/v1/orders/${id}/status`)
+        .set("Authorization", `Bearer ${sellerToken}`)
+        .send({ status: "shipped" });
+      await request(app)
+        .patch(`/api/v1/orders/${id}/status`)
+        .set("Authorization", `Bearer ${sellerToken}`)
+        .send({ status: "delivered" });
+
+      // Buyer completes — should trigger Stripe transfer
+      const completed = await request(app)
+        .patch(`/api/v1/orders/${id}/status`)
+        .set("Authorization", `Bearer ${buyerToken}`)
+        .send({ status: "completed" });
+
+      expect(completed.status).toBe(200);
+      expect(completed.body.status).toBe("completed");
+      expect(completed.body.completedAt).toBeDefined();
+      expect(completed.body.stripeTransferId).toBe("tr_test123");
+
+      // Verify the transfer was created with correct params
+      const { stripe } = await import("../features/payments/stripe-client.js");
+      expect(stripe.transfers.create).toHaveBeenCalledWith({
+        amount: 9500, // sellerPayout $95.00 in cents
+        currency: "usd",
+        destination: "acct_test123",
+        metadata: {
+          order_id: id,
+          buyer_id: buyerId,
+          seller_id: sellerId,
+        },
+      });
+    });
+
+    it("rejects completion with 502 TRANSFER_FAILED when Stripe transfer fails", async () => {
+      const listing = await createListing();
+
+      const order = await request(app)
+        .post("/api/v1/orders")
+        .set("Authorization", `Bearer ${buyerToken}`)
+        .send({ listingId: listing.id });
+      const id = order.body.id;
+
+      // Progress to delivered
+      await request(app)
+        .post(`/api/v1/orders/${id}/pay`)
+        .set("Authorization", `Bearer ${buyerToken}`);
+      await request(app)
+        .patch(`/api/v1/orders/${id}/status`)
+        .set("Authorization", `Bearer ${sellerToken}`)
+        .send({ status: "shipped" });
+      await request(app)
+        .patch(`/api/v1/orders/${id}/status`)
+        .set("Authorization", `Bearer ${sellerToken}`)
+        .send({ status: "delivered" });
+
+      // Simulate transfer failure
+      const { stripe } = await import("../features/payments/stripe-client.js");
+      const apiError = Object.assign(
+        Object.create(Stripe.errors.StripeAPIError.prototype),
+        {
+          type: "api_error",
+          statusCode: 500,
+          message: "Stripe transfer failed",
+        },
+      );
+      vi.mocked(stripe.transfers.create).mockRejectedValueOnce(apiError);
+
+      const completed = await request(app)
+        .patch(`/api/v1/orders/${id}/status`)
+        .set("Authorization", `Bearer ${buyerToken}`)
+        .send({ status: "completed" });
+
+      expect(completed.status).toBe(502);
+      expect(completed.body.error.code).toBe("TRANSFER_FAILED");
+
+      // Order stays in delivered
+      const getOrder = await request(app)
+        .get(`/api/v1/orders/${id}`)
+        .set("Authorization", `Bearer ${buyerToken}`);
+      expect(getOrder.body.status).toBe("delivered");
+      expect(getOrder.body.stripeTransferId).toBeNull();
+    });
+  });
 
 describe("GET buyer/seller order lists", () => {
   it("lists buyer purchases", async () => {
