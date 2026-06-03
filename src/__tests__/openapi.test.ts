@@ -38,6 +38,9 @@ describe("GET /api/docs.json", () => {
     // Seller
     expect(paths).toContain("/api/v1/seller/onboard");
     expect(paths).toContain("/api/v1/seller/onboard/status");
+
+    // Webhooks
+    expect(paths).toContain("/api/v1/webhooks/stripe");
   });
 
   it("has all expected component schemas", async () => {
