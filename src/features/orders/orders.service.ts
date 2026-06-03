@@ -1,12 +1,14 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { NotFoundError, ForbiddenError, AppError, ConflictError } from "../../shared/errors.js";
+import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../../shared/errors.js";
+import Stripe from "stripe";
 import { ensureParticipant } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
 import { PLATFORM_FEE_PERCENT } from "./orders.schemas.js";
 import { transition, type OrderStatus } from "./state-machine.js";
 import { stripe } from "../payments/stripe-client.js";
 import { toCents } from "../payments/amount-utils.js";
+import { logger } from "../../shared/logger.js";
 import { mapStripeError } from "../payments/error-mapping.js";
 import { isOrderExpired, expireOrderAndReleaseListing, getPendingOrderOnListing } from "./expiry.js";
 
@@ -228,9 +230,46 @@ export async function transitionStatus(
     throw new AppError(400, result.errorCode ?? "INVALID_TRANSITION", result.error!);
   }
 
+  // Execute Stripe transfer when buyer completes the order
+  let stripeTransferId: string | undefined;
+  if (newStatus === "completed") {
+    const [seller] = await db
+      .select({ stripeAccountId: schema.users.stripeAccountId })
+      .from(schema.users)
+      .where(eq(schema.users.id, order.sellerId))
+      .limit(1);
+
+    try {
+      stripeTransferId = (
+        await stripe.transfers.create({
+          amount: toCents(order.sellerPayout),
+          currency: "usd",
+          destination: seller!.stripeAccountId!,
+          metadata: {
+            order_id: order.id,
+            buyer_id: order.buyerId,
+            seller_id: order.sellerId,
+          },
+        })
+      ).id;
+    } catch (err) {
+      if (err instanceof Stripe.errors.StripeError) {
+        logger.error(
+          { stripeRequestId: err.requestId, stripeType: err.type },
+          "Stripe transfer failed",
+        );
+        throw new AppError(502, "TRANSFER_FAILED", "Stripe transfer failed");
+      }
+      throw err;
+    }
+  }
+
   const updates: Record<string, unknown> = { status: newStatus, updatedAt: new Date() };
   if (result.timestampField) {
     updates[result.timestampField] = new Date();
+  }
+  if (stripeTransferId) {
+    updates.stripeTransferId = stripeTransferId;
   }
 
   const [updated] = await db
