@@ -12,6 +12,44 @@ import { logger } from "../../shared/logger.js";
 import { mapStripeError } from "../payments/error-mapping.js";
 import { isOrderExpired, expireOrderAndReleaseListing, getPendingOrderOnListing } from "./expiry.js";
 
+export async function createOrGetPaymentIntent(order: {
+  id: string;
+  total: string;
+  buyerId: string;
+  sellerId: string;
+  listingId: string;
+}) {
+  try {
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: toCents(order.total),
+        currency: "usd",
+        capture_method: "automatic",
+        payment_method_types: ["card"],
+        metadata: {
+          order_id: order.id,
+          buyer_id: order.buyerId,
+          seller_id: order.sellerId,
+          listing_id: order.listingId,
+        },
+      },
+      { idempotencyKey: order.id },
+    );
+
+    await db
+      .update(schema.orders)
+      .set({ stripePaymentIntentId: paymentIntent.id, updatedAt: new Date() })
+      .where(eq(schema.orders.id, order.id));
+
+    return {
+      id: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret ?? null,
+    };
+  } catch (err) {
+    throw mapStripeError(err);
+  }
+}
+
 export async function createOrder(buyerId: string, listingId: string) {
   // Verify listing exists
   const [listing] = await db
@@ -70,38 +108,16 @@ export async function createOrder(buyerId: string, listingId: string) {
     .where(eq(schema.listings.id, listingId));
 
   // Create Stripe PaymentIntent
-  let clientSecret: string | undefined;
-  let stripePaymentIntentId: string | undefined;
-  try {
-    const paymentIntent = await stripe.paymentIntents.create(
-      {
-        amount: toCents(order.total),
-        currency: "usd",
-        capture_method: "automatic",
-        payment_method_types: ["card"],
-        metadata: {
-          order_id: order.id,
-          buyer_id: buyerId,
-          seller_id: listing.sellerId,
-          listing_id: listingId,
-        },
-      },
-      { idempotencyKey: order.id },
-    );
-    stripePaymentIntentId = paymentIntent.id;
-    clientSecret = paymentIntent.client_secret ?? undefined;
+  const { id: stripePaymentIntentId, clientSecret } =
+    await createOrGetPaymentIntent({
+      id: order.id,
+      total: order.total,
+      buyerId: buyerId,
+      sellerId: listing.sellerId,
+      listingId,
+    });
 
-    await db
-      .update(schema.orders)
-      .set({ stripePaymentIntentId, updatedAt: new Date() })
-      .where(eq(schema.orders.id, order.id));
-  } catch (err) {
-    // If Stripe fails, order exists without PaymentIntent.
-    // The pay endpoint will lazily create one if missing.
-    throw mapStripeError(err);
-  }
-
-  return { ...order, stripePaymentIntentId, clientSecret };
+  return { ...order, stripePaymentIntentId, clientSecret: clientSecret ?? undefined };
 }
 
 export async function payOrder(orderId: string, userId: string) {
@@ -121,30 +137,14 @@ export async function payOrder(orderId: string, userId: string) {
   let stripePaymentIntentId = order.stripePaymentIntentId;
   if (!stripePaymentIntentId) {
     // Lazily create a PaymentIntent if missing
-    try {
-      const paymentIntent = await stripe.paymentIntents.create(
-        {
-          amount: toCents(order.total),
-          currency: "usd",
-          capture_method: "automatic",
-          payment_method_types: ["card"],
-          metadata: {
-            order_id: order.id,
-            buyer_id: order.buyerId,
-            seller_id: order.sellerId,
-            listing_id: order.listingId,
-          },
-        },
-        { idempotencyKey: order.id },
-      );
-      stripePaymentIntentId = paymentIntent.id;
-      await db
-        .update(schema.orders)
-        .set({ stripePaymentIntentId, updatedAt: new Date() })
-        .where(eq(schema.orders.id, orderId));
-    } catch (err) {
-      throw mapStripeError(err);
-    }
+    const pi = await createOrGetPaymentIntent({
+      id: order.id,
+      total: order.total,
+      buyerId: order.buyerId,
+      sellerId: order.sellerId,
+      listingId: order.listingId,
+    });
+    stripePaymentIntentId = pi.id;
   }
 
   try {
