@@ -32,6 +32,14 @@ vi.mock("../features/payments/stripe-client.js", () => ({
         status: "canceled",
       }),
     },
+    refunds: {
+      create: vi.fn().mockResolvedValue({
+        id: "re_test123",
+        amount: 10500,
+        status: "succeeded",
+        payment_intent: "pi_test123",
+      }),
+    },
   },
 }));
 
@@ -590,6 +598,27 @@ describe("Order state machine", () => {
     expect(res.body.error.code).toBe("TRANSITION_REMOVED");
   });
 
+  it("rejects refunded transition through PATCH status endpoint (use dedicated refund endpoint)", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Pay first so it's in a state where refunded would otherwise be valid
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    const res = await request(app)
+      .patch(`/api/v1/orders/${order.body.id}/status`)
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ status: "refunded" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("TRANSITION_REMOVED");
+  });
+
   it("completed orders cannot be modified", async () => {
     const listing = await createListing();
 
@@ -688,5 +717,255 @@ describe("GET buyer/seller order lists", () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].status).toBe("paid");
+  });
+});
+
+describe("POST /api/v1/orders/:id/refund", () => {
+  it("refunds a paid order and stores the Stripe refund ID", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Pay first
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    // Refund
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("refunded");
+    expect(res.body.refundedAt).toBeDefined();
+    expect(res.body.stripeRefundId).toBe("re_test123");
+  });
+
+  it("rejects refund from a non-buyer", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Pay first
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${sellerToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("refunds an order in shipped status", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    await request(app)
+      .patch(`/api/v1/orders/${order.body.id}/status`)
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ status: "shipped" });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("refunded");
+  });
+
+  it("refunds an order in delivered status", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    await request(app)
+      .patch(`/api/v1/orders/${order.body.id}/status`)
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ status: "shipped" });
+
+    await request(app)
+      .patch(`/api/v1/orders/${order.body.id}/status`)
+      .set("Authorization", `Bearer ${sellerToken}`)
+      .send({ status: "delivered" });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("refunded");
+  });
+
+  it("returns 400 when refunding a pending order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
+
+  it("returns 400 when refunding a completed order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+    const id = order.body.id;
+
+    // Progress to completed
+    await request(app).post(`/api/v1/orders/${id}/pay`).set("Authorization", `Bearer ${buyerToken}`);
+    await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${sellerToken}`).send({ status: "shipped" });
+    await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${sellerToken}`).send({ status: "delivered" });
+    await request(app).patch(`/api/v1/orders/${id}/status`).set("Authorization", `Bearer ${buyerToken}`).send({ status: "completed" });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
+
+  it("returns 400 when refunding an already refunded order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    // First refund
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    // Second refund should fail
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
+
+  it("returns 400 when refunding a cancelled order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
+
+  it("returns 400 when refunding an expired order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Backdate the order to expire it, then try to pay (which triggers expiry)
+    const EXPIRY_MINUTES = 30;
+    const expiredDate = new Date(Date.now() - (EXPIRY_MINUTES + 1) * 60 * 1000);
+    const db = getDb();
+    await db
+      .update(orders)
+      .set({ createdAt: expiredDate })
+      .where(sql`id = ${order.body.id}`);
+
+    // Trying to pay triggers the expiry transition
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
+
+  it("returns 401 when not authenticated", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 502 on Stripe API error", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    const { stripe } = await import("../features/payments/stripe-client.js");
+    const apiError = Object.assign(
+      Object.create(Stripe.errors.StripeAPIError.prototype),
+      {
+        type: "api_error",
+        statusCode: 500,
+        message: "Stripe API error",
+      },
+    );
+    vi.mocked(stripe.refunds.create).mockRejectedValueOnce(apiError);
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/refund`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe("PAYMENT_SERVICE_UNAVAILABLE");
   });
 });

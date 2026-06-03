@@ -33,6 +33,7 @@ describe("GET /api/docs.json", () => {
     expect(paths).toContain("/api/v1/orders/seller/sales");
     expect(paths).toContain("/api/v1/orders/{id}");
     expect(paths).toContain("/api/v1/orders/{id}/status");
+    expect(paths).toContain("/api/v1/orders/{id}/refund");
 
     // Seller
     expect(paths).toContain("/api/v1/seller/onboard");

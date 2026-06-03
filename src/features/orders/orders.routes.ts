@@ -25,6 +25,12 @@ ordersRouter.post("/:id/cancel", asyncHandler(async (req, res) => {
   res.json(order);
 }));
 
+// Buyer: request a refund
+ordersRouter.post("/:id/refund", asyncHandler(async (req, res) => {
+  const order = await ordersService.refundOrder(req.params.id as string, req.user!.sub);
+  res.json(order);
+}));
+
 // Buyer: list my purchases
 ordersRouter.get("/buyer/purchases", validate(listOrdersSchema, "query"), asyncHandler(async (req, res) => {
   const { page, limit, status } = req.query as any;
@@ -54,8 +60,8 @@ ordersRouter.get("/:id", asyncHandler(async (req, res) => {
 // Transition order status
 ordersRouter.patch("/:id/status", asyncHandler(async (req, res) => {
   const { status } = req.body;
-  if (status === "paid" || status === "cancelled") {
-    throw new AppError(400, "TRANSITION_REMOVED", `Use POST /api/v1/orders/:id/${status === "paid" ? "pay" : "cancel"} instead`);
+  if (status === "paid" || status === "cancelled" || status === "refunded") {
+    throw new AppError(400, "TRANSITION_REMOVED", `Use POST /api/v1/orders/:id/${status === "paid" ? "pay" : status === "cancelled" ? "cancel" : "refund"} instead`);
   }
   const order = await ordersService.transitionStatus(req.params.id as string, status, req.user!.sub);
   res.json(order);
