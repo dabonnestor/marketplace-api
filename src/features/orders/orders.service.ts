@@ -277,3 +277,31 @@ export async function listSellerOrders(sellerId: string, page: number, limit: nu
 
   return paginate(baseQuery, countQuery, page, limit);
 }
+
+export async function refundOrder(orderId: string, userId: string) {
+  const order = await getOrder(orderId, userId);
+
+  if (order.buyerId !== userId) {
+    throw new ForbiddenError("Only the buyer can request a refund");
+  }
+
+  let stripeRefundId: string;
+  try {
+    const refund = await stripe.refunds.create({
+      payment_intent: order.stripePaymentIntentId!,
+      amount: toCents(order.total),
+    });
+    stripeRefundId = refund.id;
+  } catch (err) {
+    throw mapStripeError(err);
+  }
+
+  const updated = await transitionStatus(orderId, "refunded", userId);
+
+  await db
+    .update(schema.orders)
+    .set({ stripeRefundId, updatedAt: new Date() })
+    .where(eq(schema.orders.id, orderId));
+
+  return { ...updated, stripeRefundId };
+}
