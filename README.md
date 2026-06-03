@@ -1,6 +1,6 @@
 # Marketplace API
 
-A RESTful API for a two-sided marketplace where buyers and sellers transact physical goods. Built with Express, TypeScript, and PostgreSQL (Drizzle ORM). Features JWT authentication, a structured order state machine, full-text search, 10% platform commission, and an OpenAPI 3.0 spec served via Swagger UI.
+A RESTful API for a two-sided marketplace where buyers and sellers transact physical goods. Built with Express, TypeScript, and PostgreSQL (Drizzle ORM). Features JWT authentication, a structured order state machine, Stripe payment processing, full-text search, 10% platform commission, and an OpenAPI 3.0 spec served via Swagger UI.
 
 ## Quick Start
 
@@ -8,9 +8,9 @@ A RESTful API for a two-sided marketplace where buyers and sellers transact phys
 # 1. Install dependencies
 npm install
 
-# 2. Set up your PostgreSQL database and configure environment variables
+# 2. Set up your environment
 cp .env.example .env
-# Fill in DATABASE_URL, JWT_SECRET, etc.
+# Fill in DATABASE_URL, JWT_SECRET, JWT_REFRESH_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
 
 # 3. Run migrations
 npm run db:migrate
@@ -38,11 +38,22 @@ The API runs at `http://localhost:3000`. API docs are at `http://localhost:3000/
 - `DELETE /api/v1/listings/:id` — Delete your listing (seller only)
 
 ### Orders
-- `POST /api/v1/orders` — Place an order on a listing (buyer only, cannot buy own listing)
+- `POST /api/v1/orders` — Place an order on a listing (buyer only, cannot buy own listing). Creates a Stripe PaymentIntent and reserves the listing.
+- `POST /api/v1/orders/:id/pay` — Pay for an order (buyer only). Confirms the Stripe PaymentIntent.
+- `POST /api/v1/orders/:id/cancel` — Cancel an order (buyer only). Cancels the Stripe PaymentIntent and releases the listing.
+- `POST /api/v1/orders/:id/complete` — Mark an order as received (buyer only). Triggers a Stripe transfer to the seller.
+- `POST /api/v1/orders/:id/refund` — Request a refund (buyer only). Creates a Stripe refund.
 - `GET /api/v1/orders/buyer/purchases` — View your purchase history (buyer, paginated, status filter)
 - `GET /api/v1/orders/seller/sales` — View your sales history (seller, paginated, status filter)
 - `GET /api/v1/orders/:id` — Get a single order (buyer or seller only)
-- `PATCH /api/v1/orders/:id/status` — Transition order status (role-gated state machine)
+- `PATCH /api/v1/orders/:id/status` — Transition order status. The paid / cancelled / refunded / completed transitions have been moved to dedicated endpoints (above); this endpoint only accepts shipped and delivered.
+
+### Seller
+- `POST /api/v1/seller/onboard` — Start or resume Stripe Connect Express onboarding
+- `GET /api/v1/seller/onboard/status` — Check onboarding status (charges_enabled, payouts_enabled)
+
+### Webhooks
+- `POST /api/v1/webhooks/stripe` — Stripe webhook receiver. Handles `payment_intent.succeeded`, `charge.dispute.created`, `charge.dispute.closed`, and `account.updated`.
 
 ### General
 - `GET /api/health` — Health check
@@ -52,10 +63,38 @@ The API runs at `http://localhost:3000`. API docs are at `http://localhost:3000/
 ## Order State Machine
 
 ```
+                 ┌──────────────────────┐
+                 │       disputed       │
+                 └──┬───────────────┬───┘
+     (dispute won) │               │ (dispute lost)
+        ┌──────────┘               └──────────┐
+        ▼                                     ▼
 pending → paid → shipped → delivered → completed
+   │       │       │          │
+   │       │       │          ├──→ refunded
+   │       │       └──────────┤
+   │       └──────────────────┤
+   │                          │
+   ├──→ cancelled             │
+   └──→ expired
 ```
 
-Status transitions are role-gated (e.g., only the buyer can mark paid, only the seller can mark shipped) and validated — invalid jumps (e.g., pending → delivered) are rejected. Once an order is `completed`, it is immutable.
+- `pending` orders expire after 30 minutes (releases the listing back to active).
+- The `disputed` state stores the previous status (`preDisputeStatus`). If the dispute is won, the order reverts; if lost, it moves to `refunded`.
+- Terminal states: `completed`, `cancelled`, `expired`, `refunded`.
+
+Transitions are role-gated (e.g., only the buyer can mark paid/cancel/complete/refund, only the seller can mark shipped/delivered). Webhook-driven transitions (payment confirmation, disputes) bypass role gating as asynchronous safety nets.
+
+## Payments
+
+Stripe is the payment provider. On order creation, a [PaymentIntent](https://docs.stripe.com/api/payment_intents) is created and its `client_secret` is returned to the buyer for client-side confirmation. The buyer then calls `POST /orders/:id/pay` to confirm server-side.
+
+Seller payouts use [Stripe Connect Express](https://docs.stripe.com/connect) accounts. Sellers complete onboarding via `POST /api/v1/seller/onboard`. When the buyer completes an order, a [transfer](https://docs.stripe.com/api/transfers) sends the seller's payout (total — 10% platform fee) to their Connect account.
+
+Webhooks serve as a safety net for async Stripe events:
+- `payment_intent.succeeded` — Marks the order as paid if the synchronous flow missed it.
+- `charge.dispute.created` — Moves the order to `disputed`, saving the previous status.
+- `charge.dispute.closed` — Reverts to the previous status (won) or moves to `refunded` (lost).
 
 ## Scripts
 
@@ -74,6 +113,7 @@ Status transitions are role-gated (e.g., only the buyer can mark paid, only the 
 
 - **Runtime**: Node.js, Express 4, TypeScript (strict mode)
 - **Database**: PostgreSQL with Drizzle ORM + Drizzle Kit migrations
+- **Payments**: Stripe (PaymentIntents, Transfers, Refunds, Connect Express accounts)
 - **Auth**: bcrypt (cost 12) + JWT (15min access / 7 day refresh tokens)
 - **Validation**: Zod (shared across request validation, DB types, and OpenAPI schema gen)
 - **Security**: helmet, CORS, express-rate-limit
@@ -104,13 +144,29 @@ src/
 │   │   ├── listings.schemas.ts
 │   │   ├── listings.service.ts
 │   │   └── openapi.ts
-│   └── orders/
-│       ├── orders.routes.ts
-│       ├── orders.schemas.ts
-│       ├── orders.service.ts
-│       ├── state-machine.ts  # Order lifecycle state machine
-│       ├── openapi.ts
-│       └── __tests__/
+│   ├── orders/
+│   │   ├── orders.routes.ts
+│   │   ├── orders.schemas.ts
+│   │   ├── orders.service.ts
+│   │   ├── state-machine.ts  # Order lifecycle state machine
+│   │   ├── commission.ts     # 10% platform fee calculation
+│   │   ├── complete-order.ts # Completion + Stripe transfer
+│   │   ├── expiry.ts         # Pending order expiry (30 min)
+│   │   ├── openapi.ts
+│   │   └── __tests__/
+│   ├── payments/
+│   │   ├── stripe-client.ts  # Stripe SDK instance
+│   │   ├── amount-utils.ts   # Decimal ↔ cents conversion
+│   │   ├── error-mapping.ts  # Stripe error → AppError
+│   │   └── __tests__/
+│   ├── seller/
+│   │   ├── seller.routes.ts  # Seller onboarding routes
+│   │   ├── seller.service.ts # Stripe Connect onboarding
+│   │   └── openapi.ts
+│   └── webhooks/
+│       ├── webhooks.routes.ts # Stripe webhook receiver
+│       ├── webhooks.service.ts # Webhook event handling
+│       └── openapi.ts
 ├── shared/
 │   ├── config.ts       # Env var validation
 │   ├── errors.ts       # Custom error classes
@@ -134,4 +190,7 @@ src/
 | `DATABASE_URL` | PostgreSQL connection string |
 | `JWT_SECRET` | Secret for signing access tokens |
 | `JWT_REFRESH_SECRET` | Secret for signing refresh tokens |
+| `STRIPE_SECRET_KEY` | Stripe secret key (sk_...) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (whsec_...) |
 | `PORT` | Server port (default: 3000) |
+| `BASE_URL` | Public base URL for Stripe Connect redirect URLs (default: http://localhost:3000) |
