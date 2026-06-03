@@ -13,7 +13,7 @@ const listingSchema = {
     condition: { type: "string" },
     shippingCost: { type: "string" },
     images: { type: "array", items: { type: "string" } },
-    status: { type: "string" },
+    status: { type: "string", enum: ["active", "reserved", "sold"] },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
   },
