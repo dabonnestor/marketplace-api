@@ -116,7 +116,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
   async function sendWebhook(event: Record<string, unknown>) {
     const { stripe } = await import("../features/payments/stripe-client.js");
     const payload = JSON.stringify(event);
-    const sig = stripe.webhooks.generateTestHeaderString({ payload });
+    const sig = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_test" });
     return request(app)
       .post("/api/v1/webhooks/stripe")
       .set("stripe-signature", sig)

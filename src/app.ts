@@ -2,16 +2,16 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import pinoHttp from "pino-http";
+import { pinoHttp } from "pino-http";
 import swaggerUi from "swagger-ui-express";
 import { logger } from "./shared/logger.js";
-import { errorHandler } from "./shared/middleware/error-handler.js";
 import { authRouter } from "./features/auth/auth.routes.js";
 import { listingsRouter } from "./features/listings/listings.routes.js";
 import { ordersRouter } from "./features/orders/orders.routes.js";
 import { sellerRouter } from "./features/seller/seller.routes.js";
 import { webhooksRouter } from "./features/webhooks/webhooks.routes.js";
 import { openApiSpec } from "./shared/openapi.js";
+import { errorHandler } from "./shared/middleware/error-handler.js";
 
 export function createApp() {
   const app = express();
