@@ -51,8 +51,8 @@ export async function onboard(userId: string) {
 
   const accountLink = await stripe.accountLinks.create({
     account: accountId,
-    refresh_url: `${config.BASE_URL}/api/v1/seller/onboard/status`,
-    return_url: `${config.BASE_URL}/api/v1/seller/onboard/status`,
+    refresh_url: `${config.FRONTEND_URL}/dashboard/seller/onboard`,
+    return_url: `${config.FRONTEND_URL}/dashboard/seller/onboard`,
     type: "account_onboarding",
   });
 
