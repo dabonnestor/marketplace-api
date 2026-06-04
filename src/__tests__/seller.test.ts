@@ -62,8 +62,8 @@ describe("POST /api/v1/seller/onboard", () => {
 
     expect(mockAccountLinkCreate).toHaveBeenCalledWith({
       account: "acct_test123",
-      refresh_url: expect.stringContaining("/api/v1/seller/onboard/status"),
-      return_url: expect.stringContaining("/api/v1/seller/onboard/status"),
+      refresh_url: expect.stringContaining("/dashboard/seller/onboard"),
+      return_url: expect.stringContaining("/dashboard/seller/onboard"),
       type: "account_onboarding",
     });
   });
