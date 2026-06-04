@@ -7,11 +7,11 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
   JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
-  PORT: z.coerce.number().int().positive().default(3000),
+  PORT: z.coerce.number().int().positive().default(8080),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
-  BASE_URL: z.string().min(1).default("http://localhost:3000"),
+  BASE_URL: z.string().min(1).default("http://localhost:8080"),
   FRONTEND_URL: z.string().min(1).default("http://localhost:3000"),
 });
 

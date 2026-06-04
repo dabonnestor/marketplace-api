@@ -19,7 +19,7 @@ npm run db:migrate
 npm run dev
 ```
 
-The API runs at `http://localhost:3000`. API docs are at `http://localhost:3000/api/docs`.
+The API runs at `http://localhost:8080`. API docs are at `http://localhost:8080/api/docs`.
 
 ## API Endpoints
 
@@ -192,5 +192,5 @@ src/
 | `JWT_REFRESH_SECRET` | Secret for signing refresh tokens |
 | `STRIPE_SECRET_KEY` | Stripe secret key (sk_...) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (whsec_...) |
-| `PORT` | Server port (default: 3000) |
-| `BASE_URL` | Public base URL for Stripe Connect redirect URLs (default: http://localhost:3000) |
+| `PORT` | Server port (default: 8080) |
+| `BASE_URL` | Public base URL for Stripe Connect redirect URLs (default: http://localhost:8080) |
