@@ -37,7 +37,7 @@ export const openApiSpec = {
     contact: { name: "API Support" },
   },
   servers: [
-    { url: "http://localhost:3000", description: "Local development" },
+    { url: "http://localhost:8080", description: "Local development" },
   ],
   security: [{ bearerAuth: [] }],
   components: {
