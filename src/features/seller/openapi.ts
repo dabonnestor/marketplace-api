@@ -9,8 +9,8 @@ const onboardStatusSchema = {
   type: "object" as const,
   properties: {
     onboarded: { type: "boolean" },
-    charges_enabled: { type: "boolean" },
-    payouts_enabled: { type: "boolean" },
+    chargesEnabled: { type: "boolean" },
+    payoutsEnabled: { type: "boolean" },
   },
 };
 

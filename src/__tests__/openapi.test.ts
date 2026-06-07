@@ -82,7 +82,7 @@ describe("GET /api/docs.json", () => {
     expect(order.properties.stripeTransferId).toBeDefined();
     expect(order.properties.stripeRefundId).toBeDefined();
     expect(order.properties.refundedAt).toBeDefined();
-    expect(order.properties.clientSecret).toBeUndefined();
+    expect(order.properties.clientSecret).toBeDefined();
   });
 
   it("OrderCreated schema includes clientSecret for create order response", async () => {

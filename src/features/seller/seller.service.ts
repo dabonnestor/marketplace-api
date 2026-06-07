@@ -11,15 +11,15 @@ export async function getStatus(userId: string) {
     .limit(1);
 
   if (!user?.stripeAccountId) {
-    return { onboarded: false, charges_enabled: false, payouts_enabled: false };
+    return { onboarded: false, chargesEnabled: false, payoutsEnabled: false };
   }
 
   const account = await stripe.accounts.retrieve(user.stripeAccountId);
 
   return {
     onboarded: true,
-    charges_enabled: account.charges_enabled ?? false,
-    payouts_enabled: account.payouts_enabled ?? false,
+    chargesEnabled: account.charges_enabled ?? false,
+    payoutsEnabled: account.payouts_enabled ?? false,
   };
 }
 
