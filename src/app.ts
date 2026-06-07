@@ -42,7 +42,7 @@ export function createApp() {
   app.use(
     rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
-      max: process.env.NODE_ENV === "test" ? 1000 : 100,
+      max: process.env.NODE_ENV === "test" ? 1000 : 1000,
       standardHeaders: true,
       legacyHeaders: false,
     }),
@@ -51,7 +51,7 @@ export function createApp() {
   // Auth rate limiter (stricter)
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: process.env.NODE_ENV === "test" ? 1000 : 100,
+    max: process.env.NODE_ENV === "test" ? 1000 : 1000,
     standardHeaders: true,
     legacyHeaders: false,
   });
