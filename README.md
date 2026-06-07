@@ -185,12 +185,23 @@ src/
 
 ## Environment Variables
 
+### Required
+
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `JWT_SECRET` | Secret for signing access tokens |
-| `JWT_REFRESH_SECRET` | Secret for signing refresh tokens |
-| `STRIPE_SECRET_KEY` | Stripe secret key (sk_...) |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (whsec_...) |
-| `PORT` | Server port (default: 8080) |
-| `BASE_URL` | Public base URL for Stripe Connect redirect URLs (default: http://localhost:8080) |
+| `JWT_SECRET` | Secret for signing access tokens (min 32 chars) |
+| `JWT_REFRESH_SECRET` | Secret for signing refresh tokens (min 32 chars) |
+| `STRIPE_SECRET_KEY` | Stripe secret key (`sk_...`) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
+
+### Optional
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8080` | Server port |
+| `NODE_ENV` | `development` | Environment (`development`, `production`, `test`) |
+| `BASE_URL` | `http://localhost:8080` | Public base URL for Stripe Connect redirects |
+| `FRONTEND_URL` | `http://localhost:3000` | Frontend URL for CORS / Stripe Connect return |
+| `JWT_ACCESS_EXPIRES_IN` | `15m` | Access token expiration |
+| `JWT_REFRESH_EXPIRES_IN` | `7d` | Refresh token expiration |
