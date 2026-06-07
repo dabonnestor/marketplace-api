@@ -18,6 +18,7 @@ const orderSchema = {
     stripeTransferId: { type: "string" },
     stripeRefundId: { type: "string" },
     preDisputeStatus: { type: "string", enum: ["pending", "paid", "shipped", "delivered", "completed", "disputed", "cancelled", "expired", "refunded"] },
+    clientSecret: { type: "string" },
     paidAt: { type: "string", format: "date-time" },
     shippedAt: { type: "string", format: "date-time" },
     deliveredAt: { type: "string", format: "date-time" },
@@ -116,10 +117,10 @@ export const orderPaths = {
   "/api/v1/orders/{id}": {
     get: {
       tags: ["Orders"],
-      summary: "Get a single order (buyer or seller only)",
+      summary: "Get a single order (buyer or seller only). Includes clientSecret for pending orders so the frontend can re-mount Stripe PaymentElement after a page refresh.",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
       responses: {
-        "200": { description: "Order", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } },
+        "200": { description: "Order (includes clientSecret when status is pending)", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } },
         "403": { description: "Not a participant" },
         "404": { description: "Not found" },
       },

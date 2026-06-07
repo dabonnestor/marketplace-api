@@ -1,3 +1,4 @@
+import Stripe from "stripe";
 import { db, schema } from "../../db/index.js";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../../shared/errors.js";
@@ -141,10 +142,22 @@ export async function payOrder(orderId: string, userId: string) {
   try {
     await stripe.paymentIntents.confirm(stripePaymentIntentId);
   } catch (err) {
+    // If confirm threw a Stripe error, the payment may have succeeded on
+    // Stripe's side despite a network timeout or connection error on ours.
+    if (err instanceof Stripe.errors.StripeError) {
+      try {
+        const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
+        if (pi.status === "succeeded" || pi.status === "processing") {
+          return transitionStatus(orderId, "paid", userId, order);
+        }
+      } catch {
+        // retrieve also failed — Stripe is genuinely unreachable
+      }
+    }
     throw mapStripeError(err);
   }
 
-  return transitionStatus(orderId, "paid", userId);
+  return transitionStatus(orderId, "paid", userId, order);
 }
 
 export async function cancelOrder(orderId: string, userId: string) {
@@ -197,6 +210,27 @@ export async function getOrder(orderId: string, userId: string) {
 
   ensureParticipant(order, userId);
 
+  // For pending orders, return the client_secret so the frontend can
+  // mount the Stripe PaymentElement after a page refresh.
+  if (order.status === "pending" && order.stripePaymentIntentId) {
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: toCents(order.total),
+        currency: "usd",
+        capture_method: "automatic",
+        payment_method_types: ["card"],
+        metadata: {
+          order_id: order.id,
+          buyer_id: order.buyerId,
+          seller_id: order.sellerId,
+          listing_id: order.listingId,
+        },
+      },
+      { idempotencyKey: order.id },
+    );
+    return { ...order, clientSecret: paymentIntent.client_secret ?? undefined };
+  }
+
   return order;
 }
 
@@ -228,8 +262,9 @@ export async function transitionStatus(
   orderId: string,
   newStatus: OrderStatus,
   userId: string,
+  prefetchedOrder?: Awaited<ReturnType<typeof getOrder>>,
 ) {
-  const order = await getOrder(orderId, userId);
+  const order = prefetchedOrder ?? await getOrder(orderId, userId);
   const currentStatus = order.status as OrderStatus;
   const role = order.buyerId === userId ? "buyer" : "seller";
 

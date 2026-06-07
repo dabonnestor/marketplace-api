@@ -118,8 +118,8 @@ describe("GET /api/v1/seller/onboard/status", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       onboarded: true,
-      charges_enabled: true,
-      payouts_enabled: false,
+      chargesEnabled: true,
+      payoutsEnabled: false,
     });
   });
 
@@ -136,8 +136,8 @@ describe("GET /api/v1/seller/onboard/status", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       onboarded: false,
-      charges_enabled: false,
-      payouts_enabled: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
     });
   });
 });
