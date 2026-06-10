@@ -322,8 +322,13 @@ export async function listBuyerOrders(
   if (status) conditions.push(eq(schema.orders.status, status as any));
 
   const baseQuery = db
-    .select()
+    .select({
+      order: schema.orders,
+      listingTitle: schema.listings.title,
+      listingImage: sql<string>`${schema.listings.images}[1]`,
+    })
     .from(schema.orders)
+    .leftJoin(schema.listings, eq(schema.orders.listingId, schema.listings.id))
     .where(and(...conditions))
     .orderBy(desc(schema.orders.createdAt));
 
@@ -332,7 +337,15 @@ export async function listBuyerOrders(
     .from(schema.orders)
     .where(and(...conditions));
 
-  return paginate(baseQuery, countQuery, page, limit);
+  const result = await paginate(baseQuery, countQuery, page, limit);
+  return {
+    data: result.data.map((row) => ({
+      ...row.order,
+      listingTitle: row.listingTitle,
+      listingImage: row.listingImage,
+    })),
+    pagination: result.pagination,
+  };
 }
 
 export async function listSellerOrders(
@@ -345,8 +358,13 @@ export async function listSellerOrders(
   if (status) conditions.push(eq(schema.orders.status, status as any));
 
   const baseQuery = db
-    .select()
+    .select({
+      order: schema.orders,
+      listingTitle: schema.listings.title,
+      listingImage: sql<string>`${schema.listings.images}[1]`,
+    })
     .from(schema.orders)
+    .leftJoin(schema.listings, eq(schema.orders.listingId, schema.listings.id))
     .where(and(...conditions))
     .orderBy(desc(schema.orders.createdAt));
 
@@ -355,7 +373,15 @@ export async function listSellerOrders(
     .from(schema.orders)
     .where(and(...conditions));
 
-  return paginate(baseQuery, countQuery, page, limit);
+  const result = await paginate(baseQuery, countQuery, page, limit);
+  return {
+    data: result.data.map((row) => ({
+      ...row.order,
+      listingTitle: row.listingTitle,
+      listingImage: row.listingImage,
+    })),
+    pagination: result.pagination,
+  };
 }
 
 export async function refundOrder(orderId: string, userId: string) {
