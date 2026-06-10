@@ -74,6 +74,7 @@ export const orders = pgTable(
     total: decimal("total", { precision: 12, scale: 2 }).notNull(),
     sellerPayout: decimal("seller_payout", { precision: 12, scale: 2 }).notNull(),
     stripePaymentIntentId: varchar("stripe_payment_intent_id"),
+    stripeClientSecret: varchar("stripe_client_secret"),
     stripeTransferId: varchar("stripe_transfer_id"),
     stripeRefundId: varchar("stripe_refund_id"),
     preDisputeStatus: orderStatusEnum("pre_dispute_status"),

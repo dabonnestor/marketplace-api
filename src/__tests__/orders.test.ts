@@ -23,6 +23,10 @@ vi.mock("../features/payments/stripe-client.js", () => ({
         id: "pi_test123",
         client_secret: "pi_test123_secret_test",
       }),
+      retrieve: vi.fn().mockResolvedValue({
+        id: "pi_test123",
+        status: "requires_confirmation",
+      }),
       confirm: vi.fn().mockResolvedValue({
         id: "pi_test123",
         status: "succeeded",
@@ -370,7 +374,7 @@ describe("POST /api/v1/orders/:id/pay", () => {
     expect(res.body.error.code).toBe("PAYMENT_SERVICE_UNAVAILABLE");
   });
 
-  it("returns 400 when paying a non-pending order", async () => {
+  it("returns the order as-is when paying an already-paid order (idempotent)", async () => {
     const listing = await createListing();
     const order = await request(app)
       .post("/api/v1/orders")
@@ -382,13 +386,67 @@ describe("POST /api/v1/orders/:id/pay", () => {
       .post(`/api/v1/orders/${order.body.id}/pay`)
       .set("Authorization", `Bearer ${buyerToken}`);
 
-    // Pay again — should fail
+    const { stripe } = await import("../features/payments/stripe-client.js");
+    const confirmCallsBefore = vi.mocked(stripe.paymentIntents.confirm).mock.calls.length;
+
+    // Pay again — idempotent, returns the already-paid order without hitting Stripe
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("paid");
+    expect(vi.mocked(stripe.paymentIntents.confirm).mock.calls.length).toBe(confirmCallsBefore);
+  });
+
+  it("returns 400 when paying a non-pending and non-paid order", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Cancel the order first
+    await request(app)
+      .post(`/api/v1/orders/${order.body.id}/cancel`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
     const res = await request(app)
       .post(`/api/v1/orders/${order.body.id}/pay`)
       .set("Authorization", `Bearer ${buyerToken}`);
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("INVALID_TRANSITION");
+  });
+
+  it("handles webhook racing ahead and marking order paid before transitionStatus runs", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    const { stripe } = await import("../features/payments/stripe-client.js");
+    const db = getDb();
+
+    // Simulate the webhook race: when confirm() is called, the webhook
+    // handler receives payment_intent.succeeded and transitions the order
+    // to "paid" before payOrder() reaches transitionStatus().
+    vi.mocked(stripe.paymentIntents.confirm).mockImplementationOnce(async () => {
+      await db
+        .update(orders)
+        .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
+        .where(sql`id = ${order.body.id}`);
+      return { id: "pi_test123", status: "succeeded" };
+    });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.body.id}/pay`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+
+    // Should succeed — the order is paid, which is what the caller wanted
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("paid");
   });
 });
 
