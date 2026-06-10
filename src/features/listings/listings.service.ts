@@ -41,15 +41,21 @@ export async function create(data: CreateListingInput, sellerId: string) {
 }
 
 export async function getById(id: string) {
-  const [listing] = await db
-    .select()
+  const [row] = await db
+    .select({
+      listing: schema.listings,
+      sellerName: schema.users.name,
+    })
     .from(schema.listings)
+    .leftJoin(schema.users, eq(schema.listings.sellerId, schema.users.id))
     .where(eq(schema.listings.id, id))
     .limit(1);
 
-  if (!listing) {
+  if (!row) {
     throw new NotFoundError("Listing", id);
   }
+
+  const listing = { ...row.listing, sellerName: row.sellerName };
 
   // Lazy expiry: if listing is reserved but the pending order has expired, release it
   listing.status = await resolveListingReservation(id);
@@ -114,8 +120,12 @@ export async function list(query: ListListingsQuery) {
   }
 
   const baseQuery = db
-    .select()
+    .select({
+      listing: schema.listings,
+      sellerName: schema.users.name,
+    })
     .from(schema.listings)
+    .leftJoin(schema.users, eq(schema.listings.sellerId, schema.users.id))
     .where(and(...conditions))
     .orderBy(desc(schema.listings.createdAt));
 
@@ -124,13 +134,21 @@ export async function list(query: ListListingsQuery) {
     .from(schema.listings)
     .where(and(...conditions));
 
-  return paginate(baseQuery, countQuery, query.page, query.limit);
+  const result = await paginate(baseQuery, countQuery, query.page, query.limit);
+  return {
+    data: result.data.map((row) => ({ ...row.listing, sellerName: row.sellerName })),
+    pagination: result.pagination,
+  };
 }
 
 export async function getBySeller(sellerId: string, page: number, limit: number) {
   const baseQuery = db
-    .select()
+    .select({
+      listing: schema.listings,
+      sellerName: schema.users.name,
+    })
     .from(schema.listings)
+    .leftJoin(schema.users, eq(schema.listings.sellerId, schema.users.id))
     .where(eq(schema.listings.sellerId, sellerId))
     .orderBy(desc(schema.listings.createdAt));
 
@@ -139,5 +157,9 @@ export async function getBySeller(sellerId: string, page: number, limit: number)
     .from(schema.listings)
     .where(eq(schema.listings.sellerId, sellerId));
 
-  return paginate(baseQuery, countQuery, page, limit);
+  const result = await paginate(baseQuery, countQuery, page, limit);
+  return {
+    data: result.data.map((row) => ({ ...row.listing, sellerName: row.sellerName })),
+    pagination: result.pagination,
+  };
 }
