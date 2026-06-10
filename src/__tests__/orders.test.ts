@@ -437,7 +437,7 @@ describe("POST /api/v1/orders/:id/pay", () => {
         .update(orders)
         .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
         .where(sql`id = ${order.body.id}`);
-      return { id: "pi_test123", status: "succeeded" };
+      return { id: "pi_test123", status: "succeeded" } as any;
     });
 
     const res = await request(app)

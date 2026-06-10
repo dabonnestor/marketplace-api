@@ -221,7 +221,7 @@ describe("getOrder", () => {
     expect(mockCreate).not.toHaveBeenCalled();
 
     // Must return the stored clientSecret
-    expect(result.clientSecret).toBe("pi_test123_secret_test");
+    expect((result as any).clientSecret).toBe("pi_test123_secret_test");
   });
 
   it("does not attach clientSecret for non-pending orders", async () => {
@@ -232,7 +232,7 @@ describe("getOrder", () => {
     const result = await getOrder(sampleOrder.id, sampleOrder.buyerId);
 
     expect(mockCreate).not.toHaveBeenCalled();
-    expect(result.clientSecret).toBeUndefined();
+    expect((result as any).clientSecret).toBeUndefined();
   });
 
   it("does not attach clientSecret when stripeClientSecret is null", async () => {
@@ -243,7 +243,7 @@ describe("getOrder", () => {
     const result = await getOrder(sampleOrder.id, sampleOrder.buyerId);
 
     expect(mockCreate).not.toHaveBeenCalled();
-    expect(result.clientSecret).toBeUndefined();
+    expect((result as any).clientSecret).toBeUndefined();
   });
 
   it("throws NotFoundError when order does not exist", async () => {
