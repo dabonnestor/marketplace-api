@@ -1,7 +1,11 @@
-import Stripe from "stripe";
 import { db, schema } from "../../db/index.js";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../../shared/errors.js";
+import {
+  AppError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../../shared/errors.js";
 import { ensureParticipant } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
 import { calculateOrderBreakdown } from "./commission.js";
@@ -35,14 +39,16 @@ export async function createOrGetPaymentIntent(order: {
       { idempotencyKey: order.id },
     );
 
+    const clientSecret = paymentIntent.client_secret ?? null;
+
     await db
       .update(schema.orders)
-      .set({ stripePaymentIntentId: paymentIntent.id, updatedAt: new Date() })
+      .set({ stripePaymentIntentId: paymentIntent.id, stripeClientSecret: clientSecret, updatedAt: new Date() })
       .where(eq(schema.orders.id, order.id));
 
     return {
       id: paymentIntent.id,
-      clientSecret: paymentIntent.client_secret ?? null,
+      clientSecret,
     };
   } catch (err) {
     throw mapStripeError(err);
@@ -68,7 +74,11 @@ export async function createOrder(buyerId: string, listingId: string) {
   }
 
   if (effectiveStatus !== "active") {
-    throw new AppError(400, "LISTING_NOT_AVAILABLE", `Cannot order this listing (status: ${effectiveStatus})`);
+    throw new AppError(
+      400,
+      "LISTING_NOT_AVAILABLE",
+      `Cannot order this listing (status: ${effectiveStatus})`,
+    );
   }
 
   if (listing.sellerId === buyerId) {
@@ -77,7 +87,10 @@ export async function createOrder(buyerId: string, listingId: string) {
 
   const subtotal = Number(listing.price);
   const shippingCost = Number(listing.shippingCost);
-  const { platformFee, total, sellerPayout } = calculateOrderBreakdown(subtotal, shippingCost);
+  const { platformFee, total, sellerPayout } = calculateOrderBreakdown(
+    subtotal,
+    shippingCost,
+  );
 
   const [order] = await db
     .insert(schema.orders)
@@ -110,7 +123,11 @@ export async function createOrder(buyerId: string, listingId: string) {
       listingId,
     });
 
-  return { ...order, stripePaymentIntentId, clientSecret: clientSecret ?? undefined };
+  return {
+    ...order,
+    stripePaymentIntentId,
+    clientSecret: clientSecret ?? undefined,
+  };
 }
 
 export async function payOrder(orderId: string, userId: string) {
@@ -120,9 +137,26 @@ export async function payOrder(orderId: string, userId: string) {
     throw new ForbiddenError("Only the buyer can pay for this order");
   }
 
+  if (order.status !== "pending") {
+    // Webhook may have already transitioned the order to paid.
+    // Return the order as-is instead of throwing — the caller wanted it paid, it is paid.
+    if (order.status === "paid") {
+      return order;
+    }
+    throw new AppError(
+      400,
+      "INVALID_TRANSITION",
+      `Cannot pay an order with status '${order.status}'`,
+    );
+  }
+
   // Lazy expiry: if pending and expired, transition to expired and release listing
   if (await expireIfStale(order)) {
-    throw new AppError(400, "ORDER_EXPIRED", "This order has expired and can no longer be paid");
+    throw new AppError(
+      400,
+      "ORDER_EXPIRED",
+      "This order has expired and can no longer be paid",
+    );
   }
 
   // Confirm the PaymentIntent
@@ -140,24 +174,29 @@ export async function payOrder(orderId: string, userId: string) {
   }
 
   try {
-    await stripe.paymentIntents.confirm(stripePaymentIntentId);
-  } catch (err) {
-    // If confirm threw a Stripe error, the payment may have succeeded on
-    // Stripe's side despite a network timeout or connection error on ours.
-    if (err instanceof Stripe.errors.StripeError) {
-      try {
-        const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
-        if (pi.status === "succeeded" || pi.status === "processing") {
-          return transitionStatus(orderId, "paid", userId, order);
-        }
-      } catch {
-        // retrieve also failed — Stripe is genuinely unreachable
-      }
+    const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
+
+    if (pi.status === "requires_confirmation") {
+      await stripe.paymentIntents.confirm(stripePaymentIntentId);
+    } else if (pi.status !== "succeeded" && pi.status !== "processing") {
+      throw new AppError(
+        400,
+        "PAYMENT_NOT_CONFIRMED",
+        `PaymentIntent status is '${pi.status}'. Complete payment on the frontend first.`,
+      );
     }
+  } catch (err) {
     throw mapStripeError(err);
   }
 
-  return transitionStatus(orderId, "paid", userId, order);
+  // Re-read after Stripe confirmation — the payment_intent.succeeded
+  // webhook may have already transitioned the order to "paid".
+  const current = await getOrder(orderId, userId);
+  if (current.status === "paid") {
+    return current;
+  }
+
+  return transitionStatus(orderId, "paid", userId);
 }
 
 export async function cancelOrder(orderId: string, userId: string) {
@@ -210,25 +249,10 @@ export async function getOrder(orderId: string, userId: string) {
 
   ensureParticipant(order, userId);
 
-  // For pending orders, return the client_secret so the frontend can
-  // mount the Stripe PaymentElement after a page refresh.
-  if (order.status === "pending" && order.stripePaymentIntentId) {
-    const paymentIntent = await stripe.paymentIntents.create(
-      {
-        amount: toCents(order.total),
-        currency: "usd",
-        capture_method: "automatic",
-        payment_method_types: ["card"],
-        metadata: {
-          order_id: order.id,
-          buyer_id: order.buyerId,
-          seller_id: order.sellerId,
-          listing_id: order.listingId,
-        },
-      },
-      { idempotencyKey: order.id },
-    );
-    return { ...order, clientSecret: paymentIntent.client_secret ?? undefined };
+  // For pending orders, include the stored client_secret so the frontend
+  // can re-mount the Stripe PaymentElement after a page refresh.
+  if (order.status === "pending" && order.stripeClientSecret) {
+    return { ...order, clientSecret: order.stripeClientSecret };
   }
 
   return order;
@@ -262,25 +286,38 @@ export async function transitionStatus(
   orderId: string,
   newStatus: OrderStatus,
   userId: string,
-  prefetchedOrder?: Awaited<ReturnType<typeof getOrder>>,
 ) {
-  const order = prefetchedOrder ?? await getOrder(orderId, userId);
+  const order = await getOrder(orderId, userId);
   const currentStatus = order.status as OrderStatus;
   const role = order.buyerId === userId ? "buyer" : "seller";
 
-  const result = transition(currentStatus, newStatus, role, order.preDisputeStatus as OrderStatus | undefined);
+  const result = transition(
+    currentStatus,
+    newStatus,
+    role,
+    order.preDisputeStatus as OrderStatus | undefined,
+  );
 
   if (!result.allowed) {
     if (result.errorCode === "FORBIDDEN") {
       throw new ForbiddenError(result.error!);
     }
-    throw new AppError(400, result.errorCode ?? "INVALID_TRANSITION", result.error!);
+    throw new AppError(
+      400,
+      result.errorCode ?? "INVALID_TRANSITION",
+      result.error!,
+    );
   }
 
   return executeTransition(orderId, newStatus, result);
 }
 
-export async function listBuyerOrders(buyerId: string, page: number, limit: number, status?: string) {
+export async function listBuyerOrders(
+  buyerId: string,
+  page: number,
+  limit: number,
+  status?: string,
+) {
   const conditions = [eq(schema.orders.buyerId, buyerId)];
   if (status) conditions.push(eq(schema.orders.status, status as any));
 
@@ -298,7 +335,12 @@ export async function listBuyerOrders(buyerId: string, page: number, limit: numb
   return paginate(baseQuery, countQuery, page, limit);
 }
 
-export async function listSellerOrders(sellerId: string, page: number, limit: number, status?: string) {
+export async function listSellerOrders(
+  sellerId: string,
+  page: number,
+  limit: number,
+  status?: string,
+) {
   const conditions = [eq(schema.orders.sellerId, sellerId)];
   if (status) conditions.push(eq(schema.orders.status, status as any));
 

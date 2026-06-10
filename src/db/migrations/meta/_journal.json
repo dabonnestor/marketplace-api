@@ -15,6 +15,13 @@
       "when": 1780408641376,
       "tag": "0001_smart_unicorn",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781015000000,
+      "tag": "0002_quiet_zaran",
+      "breakpoints": true
     }
   ]
 }

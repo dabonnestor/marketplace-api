@@ -23,6 +23,10 @@ vi.mock("../features/payments/stripe-client.js", () => ({
         id: "pi_test123",
         client_secret: "pi_test123_secret_test",
       }),
+      retrieve: vi.fn().mockResolvedValue({
+        id: "pi_test123",
+        status: "requires_confirmation",
+      }),
       confirm: vi.fn().mockResolvedValue({
         id: "pi_test123",
         status: "succeeded",
