@@ -5,7 +5,6 @@ import { asyncHandler } from "../../shared/middleware/async-handler.js";
 import { createOrderSchema, listOrdersSchema } from "./orders.schemas.js";
 import { AppError } from "../../shared/errors.js";
 import * as ordersService from "./orders.service.js";
-import { completeOrder } from "./complete-order.js";
 
 export const ordersRouter = Router();
 
@@ -28,7 +27,7 @@ ordersRouter.post("/:id/cancel", asyncHandler(async (req, res) => {
 
 // Buyer: complete an order (mark as received)
 ordersRouter.post("/:id/complete", asyncHandler(async (req, res) => {
-  const order = await completeOrder(req.params.id as string, req.user!.sub);
+  const order = await ordersService.completeOrder(req.params.id as string, req.user!.sub);
   res.json(order);
 }));
 

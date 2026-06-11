@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { db, schema } from "../../db/index.js";
 import { logger } from "../../shared/logger.js";
-import { transition, type OrderStatus } from "../orders/state-machine.js";
-import { executeTransition } from "../orders/orders.service.js";
+import { AppError } from "../../shared/errors.js";
+import { transitionOrder } from "../orders/orders.service.js";
 import { expireIfStale } from "../orders/expiry.js";
 
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
@@ -57,15 +57,15 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
     return;
   }
 
-  const currentStatus = order.status as OrderStatus;
-  const result = transition(currentStatus, "paid");
-
-  if (!result.allowed) {
-    logger.info({ orderId, currentStatus }, "payment_intent.succeeded webhook: transition not allowed (already processed)");
-    return;
+  try {
+    await transitionOrder(order, "paid");
+  } catch (err) {
+    if (err instanceof AppError && err.code === "INVALID_TRANSITION") {
+      logger.info({ orderId, currentStatus: order.status }, "payment_intent.succeeded webhook: transition not allowed (already processed)");
+      return;
+    }
+    throw err;
   }
-
-  await executeTransition(orderId, "paid", result);
 
   logger.info({ orderId }, "Order marked as paid via webhook (safety net)");
 }
@@ -83,17 +83,19 @@ async function handleDisputeCreated(dispute: Stripe.Dispute) {
     return;
   }
 
-  const currentStatus = order.status as OrderStatus;
-  const result = transition(currentStatus, "disputed");
-
-  if (!result.allowed) {
-    logger.info({ orderId: order.id, currentStatus }, "charge.dispute.created webhook: transition not allowed (already processed)");
-    return;
+  try {
+    await transitionOrder(order, "disputed", {
+      extraUpdates: { preDisputeStatus: order.status },
+    });
+  } catch (err) {
+    if (err instanceof AppError && err.code === "INVALID_TRANSITION") {
+      logger.info({ orderId: order.id, currentStatus: order.status }, "charge.dispute.created webhook: transition not allowed (already processed)");
+      return;
+    }
+    throw err;
   }
 
-  await executeTransition(order.id, "disputed", result, { preDisputeStatus: currentStatus });
-
-  logger.info({ orderId: order.id, preDisputeStatus: currentStatus }, "Order transitioned to disputed via webhook");
+  logger.info({ orderId: order.id, preDisputeStatus: order.status }, "Order transitioned to disputed via webhook");
 }
 
 async function handleDisputeClosed(dispute: Stripe.Dispute) {
@@ -109,35 +111,37 @@ async function handleDisputeClosed(dispute: Stripe.Dispute) {
     return;
   }
 
-  const currentStatus = order.status as OrderStatus;
-  const disputeStatus = dispute.status;
-  const preDisputeStatus = order.preDisputeStatus as OrderStatus | null;
+  const preDisputeStatus = order.preDisputeStatus as string | null;
 
-  if (disputeStatus === "won") {
+  if (dispute.status === "won") {
     if (!preDisputeStatus) {
       logger.warn({ orderId: order.id }, "charge.dispute.closed won but no preDisputeStatus stored");
       return;
     }
 
-    const result = transition(currentStatus, preDisputeStatus, undefined, preDisputeStatus);
-
-    if (!result.allowed) {
-      logger.info({ orderId: order.id, currentStatus, preDisputeStatus }, "charge.dispute.closed won: transition not allowed (already processed)");
-      return;
+    try {
+      await transitionOrder(order, preDisputeStatus as any, {
+        extraUpdates: { preDisputeStatus: null },
+      });
+    } catch (err) {
+      if (err instanceof AppError && err.code === "INVALID_TRANSITION") {
+        logger.info({ orderId: order.id, currentStatus: order.status, preDisputeStatus }, "charge.dispute.closed won: transition not allowed (already processed)");
+        return;
+      }
+      throw err;
     }
-
-    await executeTransition(order.id, preDisputeStatus, result, { preDisputeStatus: null });
 
     logger.info({ orderId: order.id, restoredStatus: preDisputeStatus }, "Order reverted from disputed via webhook (dispute won)");
-  } else if (disputeStatus === "lost") {
-    const result = transition(currentStatus, "refunded");
-
-    if (!result.allowed) {
-      logger.info({ orderId: order.id, currentStatus }, "charge.dispute.closed lost: transition not allowed (already processed)");
-      return;
+  } else if (dispute.status === "lost") {
+    try {
+      await transitionOrder(order, "refunded");
+    } catch (err) {
+      if (err instanceof AppError && err.code === "INVALID_TRANSITION") {
+        logger.info({ orderId: order.id, currentStatus: order.status }, "charge.dispute.closed lost: transition not allowed (already processed)");
+        return;
+      }
+      throw err;
     }
-
-    await executeTransition(order.id, "refunded", result);
 
     logger.info({ orderId: order.id }, "Order transitioned to refunded via webhook (dispute lost)");
   }

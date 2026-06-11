@@ -25,51 +25,65 @@ vi.mock("../../../db/index.js", () => {
   };
 });
 
-const { executeTransition } = await import("../orders.service.js");
+vi.mock("../../../shared/errors.js", () => ({
+  AppError: class AppError extends Error {
+    statusCode: number;
+    code: string;
+    constructor(statusCode: number, code: string, message: string) {
+      super(message);
+      this.statusCode = statusCode;
+      this.code = code;
+    }
+  },
+  ForbiddenError: class ForbiddenError extends Error {
+    statusCode = 403;
+    constructor(message: string) {
+      super(message);
+    }
+  },
+}));
+
+const { transitionOrder } = await import("../orders.service.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("executeTransition", () => {
-  it("persists status and updatedAt, and returns the updated order", async () => {
-    const fakeOrder = { id: "order_1", status: "paid", updatedAt: new Date() };
-    mockDbUpdateWhereReturning.mockResolvedValueOnce([fakeOrder]);
+function makeOrder(overrides: Partial<{ id: string; status: string; buyerId: string; sellerId: string; preDisputeStatus: string | null }> = {}) {
+  return {
+    id: "order_1",
+    status: "pending",
+    buyerId: "buyer_1",
+    sellerId: "seller_1",
+    preDisputeStatus: null,
+    ...overrides,
+  };
+}
 
-    const result = await executeTransition("order_1", "paid", { allowed: true });
+describe("transitionOrder", () => {
+  it("persists status, updatedAt, and timestampField, and returns the updated order", async () => {
+    const updated = { id: "order_1", status: "paid", paidAt: new Date() };
+    mockDbUpdateWhereReturning.mockResolvedValueOnce([updated]);
+
+    const result = await transitionOrder(makeOrder(), "paid", { userId: "buyer_1" });
 
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
       status: "paid",
       updatedAt: expect.any(Date),
+      paidAt: expect.any(Date),
     });
-    expect(result).toEqual(fakeOrder);
+    expect(result).toEqual(updated);
   });
 
-  it("sets the timestampField in the update when result provides one", async () => {
-    const fakeOrder = { id: "order_1", status: "completed", completedAt: new Date() };
-    mockDbUpdateWhereReturning.mockResolvedValueOnce([fakeOrder]);
+  it("does not set a timestampField when the state machine does not provide one", async () => {
+    mockDbUpdateWhereReturning.mockResolvedValueOnce([{ id: "order_1", status: "cancelled" }]);
 
-    await executeTransition("order_1", "completed", {
-      allowed: true,
-      timestampField: "completedAt",
-    });
-
-    expect(mockDbUpdateSet).toHaveBeenCalledWith({
-      status: "completed",
-      updatedAt: expect.any(Date),
-      completedAt: expect.any(Date),
-    });
-  });
-
-  it("does not set a timestampField when result does not provide one", async () => {
-    mockDbUpdateWhereReturning.mockResolvedValueOnce([{ id: "order_1", status: "disputed" }]);
-
-    await executeTransition("order_1", "disputed", { allowed: true });
+    await transitionOrder(makeOrder(), "cancelled", { userId: "buyer_1" });
 
     const callArgs = mockDbUpdateSet.mock.calls[0][0];
-    expect(callArgs).toHaveProperty("status", "disputed");
+    expect(callArgs).toHaveProperty("status", "cancelled");
     expect(callArgs).toHaveProperty("updatedAt");
-    expect(callArgs).not.toHaveProperty("disputedAt");
+    expect(callArgs).not.toHaveProperty("cancelledAt");
   });
 
   it("merges extraUpdates into the persisted record", async () => {
@@ -77,8 +91,8 @@ describe("executeTransition", () => {
       { id: "order_1", status: "disputed", preDisputeStatus: "paid" },
     ]);
 
-    await executeTransition("order_1", "disputed", { allowed: true }, {
-      preDisputeStatus: "paid",
+    await transitionOrder(makeOrder({ status: "paid" }), "disputed", {
+      extraUpdates: { preDisputeStatus: "paid" },
     });
 
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
@@ -93,8 +107,8 @@ describe("executeTransition", () => {
       { id: "order_1", status: "paid", preDisputeStatus: null },
     ]);
 
-    await executeTransition("order_1", "paid", { allowed: true, timestampField: "paidAt" }, {
-      preDisputeStatus: null,
+    await transitionOrder(makeOrder({ status: "disputed", preDisputeStatus: "paid" }), "paid", {
+      extraUpdates: { preDisputeStatus: null },
     });
 
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
@@ -103,5 +117,34 @@ describe("executeTransition", () => {
       paidAt: expect.any(Date),
       preDisputeStatus: null,
     });
+  });
+
+  it("throws ForbiddenError when userId is provided but user is not a participant", async () => {
+    await expect(
+      transitionOrder(makeOrder(), "paid", { userId: "stranger" }),
+    ).rejects.toThrow("not a participant");
+  });
+
+  it("allows system calls without userId (no role check)", async () => {
+    const updated = { id: "order_1", status: "paid", paidAt: new Date() };
+    mockDbUpdateWhereReturning.mockResolvedValueOnce([updated]);
+
+    const result = await transitionOrder(makeOrder(), "paid");
+
+    expect(result).toEqual(updated);
+  });
+
+  it("throws INVALID_TRANSITION for disallowed transitions", async () => {
+    // completed is terminal — no transitions from it
+    await expect(
+      transitionOrder(makeOrder({ status: "completed" }), "paid"),
+    ).rejects.toThrow("Cannot transition order from 'completed' to 'paid'");
+  });
+
+  it("throws ForbiddenError for role-restricted transitions by wrong role", async () => {
+    // shipped requires seller, but buyer_1 is the buyer
+    await expect(
+      transitionOrder(makeOrder({ status: "paid" }), "shipped", { userId: "buyer_1" }),
+    ).rejects.toThrow("Only the seller can mark the order as shipped");
   });
 });
