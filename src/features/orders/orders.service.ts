@@ -19,7 +19,8 @@ import {
   createTransfer,
 } from "../payments/payments-adapter.js";
 import { logger } from "../../shared/logger.js";
-import { resolveListingReservation, expireIfStale } from "./expiry.js";
+import { resolveListingStatus } from "../../shared/reservation.js";
+import { expireIfStale } from "./expiry.js";
 
 export async function createOrGetPaymentIntent(order: {
   id: string;
@@ -59,7 +60,7 @@ export async function createOrder(buyerId: string, listingId: string) {
     throw new NotFoundError("Listing", listingId);
   }
 
-  const effectiveStatus = await resolveListingReservation(listingId);
+  const effectiveStatus = await resolveListingStatus(listingId);
 
   if (effectiveStatus === "reserved") {
     throw new ConflictError("This listing already has a pending order");
