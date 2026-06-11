@@ -4,7 +4,7 @@ const mockDbSelect = vi.fn();
 const mockDbUpdateSet = vi.fn();
 const mockDbUpdateWhere = vi.fn();
 
-vi.mock("../../../db/index.js", () => {
+vi.mock("../../db/index.js", () => {
   const eq = (a: any, b: any) => ({ type: "eq", left: a, right: b });
   const and = (...args: any[]) => ({ type: "and", args });
   const sql = (strings: TemplateStringsArray, ...values: any[]) => ({
@@ -38,7 +38,6 @@ vi.mock("../../../db/index.js", () => {
         listingId: { name: "listingId" },
         status: { name: "status" },
         createdAt: { name: "createdAt" },
-        updatedAt: { name: "updatedAt" },
       },
       listings: {
         id: { name: "id" },
@@ -52,22 +51,33 @@ vi.mock("../../../db/index.js", () => {
   };
 });
 
-const { expireIfStale, ORDER_EXPIRY_MINUTES } = await import("../expiry.js");
+const { resolveListingStatus } = await import("../reservation.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("expireIfStale", () => {
-  it("returns true and releases listing for a pending order that the DB expired", async () => {
-    const order = { id: "order_1", listingId: "listing_1", status: "pending" };
+describe("resolveListingStatus", () => {
+  it("returns the current status for a non-reserved listing (active)", async () => {
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "active" }]);
 
-    // DB found a stale row and updated it
+    const result = await resolveListingStatus("listing_1");
+
+    expect(result).toBe("active");
+  });
+
+  it("releases an expired reservation and returns active", async () => {
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "reserved" }]);
+    mockDbSelect.mockResolvedValueOnce([
+      { id: "order_1", listingId: "listing_1", status: "pending", createdAt: new Date() },
+    ]);
+
     mockDbUpdateWhere.mockResolvedValueOnce([{ id: "order_1" }]);
 
-    const result = await expireIfStale(order);
+    const result = await resolveListingStatus("listing_1");
 
-    expect(result).toBe(true);
+    expect(result).toBe("active");
+
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
       status: "expired",
       updatedAt: expect.any(Date),
@@ -78,15 +88,17 @@ describe("expireIfStale", () => {
     });
   });
 
-  it("returns false for a pending order that is not yet stale per DB", async () => {
-    const order = { id: "order_1", listingId: "listing_1", status: "pending" };
+  it("returns reserved when the pending order has not yet expired", async () => {
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "reserved" }]);
+    mockDbSelect.mockResolvedValueOnce([
+      { id: "order_1", listingId: "listing_1", status: "pending", createdAt: new Date() },
+    ]);
 
-    // DB did NOT find a stale row
     mockDbUpdateWhere.mockResolvedValueOnce([]);
 
-    const result = await expireIfStale(order);
+    const result = await resolveListingStatus("listing_1");
 
-    expect(result).toBe(false);
+    expect(result).toBe("reserved");
     expect(mockDbUpdateSet).toHaveBeenCalledTimes(1);
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
       status: "expired",
@@ -94,12 +106,19 @@ describe("expireIfStale", () => {
     });
   });
 
-  it("returns false for a non-pending order without touching DB", async () => {
-    const order = { id: "order_1", listingId: "listing_1", status: "paid" };
+  it("passes through non-reserved status unchanged (sold)", async () => {
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "sold" }]);
 
-    const result = await expireIfStale(order);
+    const result = await resolveListingStatus("listing_1");
 
-    expect(result).toBe(false);
-    expect(mockDbUpdateSet).not.toHaveBeenCalled();
+    expect(result).toBe("sold");
+  });
+
+  it("returns 'not_found' when the listing does not exist", async () => {
+    mockDbSelect.mockResolvedValueOnce([]);
+
+    const result = await resolveListingStatus("nonexistent");
+
+    expect(result).toBe("not_found");
   });
 });

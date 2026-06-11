@@ -4,7 +4,7 @@ import { AppError, NotFoundError } from "../../shared/errors.js";
 import { ensureOwner } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
 import { stripe } from "../payments/stripe-client.js";
-import { resolveListingReservation } from "../orders/expiry.js";
+import { resolveListingStatus } from "../../shared/reservation.js";
 import type { CreateListingInput, UpdateListingInput, ListListingsQuery } from "./listings.schemas.js";
 
 async function ensureOnboarded(sellerId: string) {
@@ -58,7 +58,7 @@ export async function getById(id: string) {
   const listing = { ...row.listing, sellerName: row.sellerName };
 
   // Lazy expiry: if listing is reserved but the pending order has expired, release it
-  listing.status = await resolveListingReservation(id);
+  listing.status = await resolveListingStatus(id);
 
   return listing;
 }
