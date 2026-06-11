@@ -1,6 +1,6 @@
 # Marketplace API
 
-A RESTful API for a two-sided marketplace where buyers and sellers transact physical goods. Built with Express, TypeScript, and PostgreSQL (Drizzle ORM). Features JWT authentication, a structured order state machine, Stripe payment processing, full-text search, 10% platform commission, and an OpenAPI 3.0 spec served via Swagger UI.
+A RESTful API for a two-sided marketplace where buyers and sellers transact physical goods. Built with Express, TypeScript, and PostgreSQL (Drizzle ORM). Features JWT authentication, a structured order state machine, Stripe payment processing with Connect Express payouts, full-text search, 10% platform commission, and an OpenAPI 3.0 spec served via Swagger UI.
 
 ## Quick Start
 
@@ -30,30 +30,30 @@ The API runs at `http://localhost:8080`. API docs are at `http://localhost:8080/
 - `GET /api/v1/auth/me` — Get the authenticated user's profile
 
 ### Listings
-- `POST /api/v1/listings` — Create a listing (auth required)
-- `GET /api/v1/listings` — Browse active listings (paginated, filterable by category, price range, keyword search)
-- `GET /api/v1/listings/mine` — List your own listings, active and sold (seller, paginated)
-- `GET /api/v1/listings/:id` — Get listing details
+- `POST /api/v1/listings` — Create a listing (auth required, seller must have completed Stripe onboarding)
+- `GET /api/v1/listings` — Browse active listings (paginated, filterable by category, price range, keyword search). Includes seller name.
+- `GET /api/v1/listings/mine` — List your own listings, active and sold (paginated)
+- `GET /api/v1/listings/:id` — Get listing details with seller name. Lazy-releases expired reservations.
 - `PATCH /api/v1/listings/:id` — Update your listing (seller only)
 - `DELETE /api/v1/listings/:id` — Delete your listing (seller only)
 
 ### Orders
-- `POST /api/v1/orders` — Place an order on a listing (buyer only, cannot buy own listing). Creates a Stripe PaymentIntent and reserves the listing.
-- `POST /api/v1/orders/:id/pay` — Pay for an order (buyer only). Confirms the Stripe PaymentIntent.
-- `POST /api/v1/orders/:id/cancel` — Cancel an order (buyer only). Cancels the Stripe PaymentIntent and releases the listing.
-- `POST /api/v1/orders/:id/complete` — Mark an order as received (buyer only). Triggers a Stripe transfer to the seller.
-- `POST /api/v1/orders/:id/refund` — Request a refund (buyer only). Creates a Stripe refund.
-- `GET /api/v1/orders/buyer/purchases` — View your purchase history (buyer, paginated, status filter)
-- `GET /api/v1/orders/seller/sales` — View your sales history (seller, paginated, status filter)
-- `GET /api/v1/orders/:id` — Get a single order (buyer or seller only)
-- `PATCH /api/v1/orders/:id/status` — Transition order status. The paid / cancelled / refunded / completed transitions have been moved to dedicated endpoints (above); this endpoint only accepts shipped and delivered.
+- `POST /api/v1/orders` — Place an order on a listing (buyer only, cannot buy own listing). Creates a Stripe PaymentIntent and reserves the listing. Returns `clientSecret` for frontend payment confirmation.
+- `POST /api/v1/orders/:id/pay` — Pay for an order (buyer only). Confirms the Stripe PaymentIntent. Idempotent: returns the order as-is if already paid.
+- `POST /api/v1/orders/:id/cancel` — Cancel an order (buyer only, only from `pending`). Cancels the Stripe PaymentIntent and releases the listing back to `active`.
+- `POST /api/v1/orders/:id/complete` — Mark an order as received (buyer only). Creates a Stripe transfer to the seller's Connect account before transitioning to `completed`. If the transfer fails, the order stays in `delivered` with a 502.
+- `POST /api/v1/orders/:id/refund` — Request a full refund (buyer only). Creates a Stripe refund and transitions to `refunded`.
+- `GET /api/v1/orders/buyer/purchases` — View your purchase history (paginated, status filter). Includes listing title and first image.
+- `GET /api/v1/orders/seller/sales` — View your sales history (paginated, status filter). Includes listing title and first image.
+- `GET /api/v1/orders/:id` — Get a single order (buyer or seller only). Returns stored `clientSecret` for pending orders.
+- `PATCH /api/v1/orders/:id/status` — Transition order status. Only accepts `shipped` and `delivered`; `paid`/`cancelled`/`refunded`/`completed` have been moved to dedicated endpoints.
 
 ### Seller
-- `POST /api/v1/seller/onboard` — Start or resume Stripe Connect Express onboarding
-- `GET /api/v1/seller/onboard/status` — Check onboarding status (charges_enabled, payouts_enabled)
+- `POST /api/v1/seller/onboard` — Start or resume Stripe Connect Express onboarding. Returns an account link URL.
+- `GET /api/v1/seller/onboard/status` — Check onboarding status (`onboarded`, `chargesEnabled`, `payoutsEnabled`)
 
 ### Webhooks
-- `POST /api/v1/webhooks/stripe` — Stripe webhook receiver. Handles `payment_intent.succeeded`, `charge.dispute.created`, `charge.dispute.closed`, and `account.updated`.
+- `POST /api/v1/webhooks/stripe` — Stripe webhook receiver. Handles `payment_intent.succeeded`, `charge.dispute.created`, `charge.dispute.closed`, `account.updated`, and `payment_intent.payment_failed`. Idempotent: replaying an already-processed event is a no-op.
 
 ### General
 - `GET /api/health` — Health check
@@ -63,38 +63,66 @@ The API runs at `http://localhost:8080`. API docs are at `http://localhost:8080/
 ## Order State Machine
 
 ```
-                 ┌──────────────────────┐
-                 │       disputed       │
-                 └──┬───────────────┬───┘
-     (dispute won) │               │ (dispute lost)
-        ┌──────────┘               └──────────┐
-        ▼                                     ▼
-pending → paid → shipped → delivered → completed
-   │       │       │          │
-   │       │       │          ├──→ refunded
-   │       │       └──────────┤
-   │       └──────────────────┤
-   │                          │
-   ├──→ cancelled             │
-   └──→ expired
+                     ┌─────────────────────────────┐
+                     │          disputed           │
+                     │  (stores preDisputeStatus)  │
+                     └──────┬──────────────┬───────┘
+              (won)  ◄──────┘              └──────►  (lost)
+            reverts to                              moves to
+         preDisputeStatus                           refunded
+                 ▲                                      │
+                 │                                      ▼
+pending ──► paid ──► shipped ──► delivered ──► completed
+   │          │         │            │
+   │          │         │            │
+   ├──► cancelled        │            │
+   │          │         │            │
+   └──► expired         └────┬───────┘
+                              ▼
+                          refunded
 ```
 
-- `pending` orders expire after 30 minutes (releases the listing back to active).
-- The `disputed` state stores the previous status (`preDisputeStatus`). If the dispute is won, the order reverts; if lost, it moves to `refunded`.
-- Terminal states: `completed`, `cancelled`, `expired`, `refunded`.
+**Transitions by role:**
 
-Transitions are role-gated (e.g., only the buyer can mark paid/cancel/complete/refund, only the seller can mark shipped/delivered). Webhook-driven transitions (payment confirmation, disputes) bypass role gating as asynchronous safety nets.
+| Transition | Role | Notes |
+|---|---|---|
+| `pending → paid` | buyer | Confirms PaymentIntent. Has webhook safety net. |
+| `pending → cancelled` | buyer | Cancels PaymentIntent, releases listing. |
+| `pending → expired` | system | Lazy: checked on pay, cancel, listing access, webhook. 30-min TTL using DB-side `now()`. |
+| `paid → shipped` | seller | |
+| `paid → refunded` | buyer | Full refund via Stripe. Platform absorbs fee. |
+| `shipped → delivered` | seller | |
+| `shipped → refunded` | buyer | Full refund via Stripe. |
+| `delivered → completed` | buyer | Creates Stripe transfer to seller. Fails with 502 if transfer errors. |
+| `delivered → refunded` | buyer | Full refund via Stripe. |
+| `* → disputed` | webhook | Triggered by `charge.dispute.created`. Saves `preDisputeStatus`. |
+| `disputed → <prev>` | webhook | On dispute won. Reverts to `preDisputeStatus`. |
+| `disputed → refunded` | webhook | On dispute lost. |
+
+Terminal states: `completed`, `cancelled`, `expired`, `refunded`.
 
 ## Payments
 
-Stripe is the payment provider. On order creation, a [PaymentIntent](https://docs.stripe.com/api/payment_intents) is created and its `client_secret` is returned to the buyer for client-side confirmation. The buyer then calls `POST /orders/:id/pay` to confirm server-side.
+Stripe is the payment provider using the **separate charges and transfers** model. The platform charges the buyer's card, holds funds in the platform's Stripe balance, and transfers the seller's payout on order completion.
 
-Seller payouts use [Stripe Connect Express](https://docs.stripe.com/connect) accounts. Sellers complete onboarding via `POST /api/v1/seller/onboard`. When the buyer completes an order, a [transfer](https://docs.stripe.com/api/transfers) sends the seller's payout (total — 10% platform fee) to their Connect account.
+### Payment flow
+On order creation, a [PaymentIntent](https://docs.stripe.com/api/payment_intents) is created and its `client_secret` is returned to the buyer for client-side confirmation (via Stripe.js). The `clientSecret` is stored in the database so the frontend can re-mount the Stripe PaymentElement after a page refresh. The buyer then calls `POST /orders/:id/pay` to confirm server-side.
 
+### Seller payouts
+Sellers use [Stripe Connect Express](https://docs.stripe.com/connect) accounts. Sellers must complete onboarding before creating listings (`POST /api/v1/seller/onboard`). Onboarding is checked at listing creation time (charges must be enabled). When the buyer completes an order, a [transfer](https://docs.stripe.com/api/transfers) sends the seller's payout (`total - 10% platform fee`) to their Connect account. If the transfer fails, the order stays in `delivered` for manual resolution.
+
+### Webhooks
 Webhooks serve as a safety net for async Stripe events:
-- `payment_intent.succeeded` — Marks the order as paid if the synchronous flow missed it.
+- `payment_intent.succeeded` — Marks the order as paid if the synchronous flow missed it. Guards against stale (expired) orders.
 - `charge.dispute.created` — Moves the order to `disputed`, saving the previous status.
 - `charge.dispute.closed` — Reverts to the previous status (won) or moves to `refunded` (lost).
+- `account.updated` — Logged for observability.
+- `payment_intent.payment_failed` — Logged for observability.
+
+Webhook handlers are idempotent: replaying an already-processed event produces an invalid state transition, which is logged and acknowledged with 200.
+
+### Commission
+10% platform fee on the listing subtotal: `platformFee = round(subtotal × 0.10, 2)`. The platform retains this by transferring only `sellerPayout = total - platformFee` to the seller. All amounts are decimal strings in API responses; Stripe amounts (cents) are converted at the payments boundary.
 
 ## Scripts
 
@@ -119,7 +147,7 @@ Webhooks serve as a safety net for async Stripe events:
 - **Security**: helmet, CORS, express-rate-limit
 - **Logging**: Pino (structured JSON)
 - **Docs**: OpenAPI 3.0 / Swagger UI
-- **Tests**: Vitest + Supertest
+- **Tests**: Vitest + Supertest (integration tests against real DB and Stripe test mode)
 
 ## Project Structure
 
@@ -151,7 +179,7 @@ src/
 │   │   ├── state-machine.ts  # Order lifecycle state machine
 │   │   ├── commission.ts     # 10% platform fee calculation
 │   │   ├── complete-order.ts # Completion + Stripe transfer
-│   │   ├── expiry.ts         # Pending order expiry (30 min)
+│   │   ├── expiry.ts         # Pending order expiry (30 min, lazy cleanup)
 │   │   ├── openapi.ts
 │   │   └── __tests__/
 │   ├── payments/
@@ -168,8 +196,8 @@ src/
 │       ├── webhooks.service.ts # Webhook event handling
 │       └── openapi.ts
 ├── shared/
-│   ├── config.ts       # Env var validation
-│   ├── errors.ts       # Custom error classes
+│   ├── config.ts       # Env var validation (Zod, crashes on missing vars)
+│   ├── errors.ts       # Custom error classes (AppError, NotFoundError, etc.)
 │   ├── guards.ts       # Ownership verification guards
 │   ├── logger.ts       # Pino logger
 │   ├── openapi.ts      # OpenAPI spec builder
