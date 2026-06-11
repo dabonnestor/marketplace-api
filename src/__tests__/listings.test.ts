@@ -12,7 +12,7 @@ const { mockAccountRetrieve } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("../features/payments/stripe-client.js", () => ({
+vi.mock("../shared/payments/stripe-client.js", () => ({
   stripe: {
     accounts: {
       create: vi.fn().mockResolvedValue({ id: "acct_test123" }),

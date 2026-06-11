@@ -12,7 +12,7 @@ const { mockAccountCreate, mockAccountLinkCreate, mockAccountRetrieve } = vi.hoi
   }),
 }));
 
-vi.mock("../features/payments/stripe-client.js", () => ({
+vi.mock("../shared/payments/stripe-client.js", () => ({
   stripe: {
     accounts: {
       create: mockAccountCreate,

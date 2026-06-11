@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { config } from "../../shared/config.js";
+import { config } from "../config.js";
 
 type StripeInstance = InstanceType<typeof Stripe>;
 

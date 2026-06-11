@@ -1,6 +1,6 @@
 import { db, schema } from "../../db/index.js";
 import { eq } from "drizzle-orm";
-import { stripe } from "../payments/stripe-client.js";
+import { stripe } from "../../shared/payments/stripe-client.js";
 import { config } from "../../shared/config.js";
 
 export async function getStatus(userId: string) {

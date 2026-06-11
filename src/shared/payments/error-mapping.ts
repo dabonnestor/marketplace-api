@@ -1,6 +1,6 @@
 import Stripe from "stripe";
-import { AppError } from "../../shared/errors.js";
-import { logger } from "../../shared/logger.js";
+import { AppError } from "../errors.js";
+import { logger } from "../logger.js";
 
 export function mapStripeError(err: unknown): Error {
   if (!(err instanceof Stripe.errors.StripeError)) {

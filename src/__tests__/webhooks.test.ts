@@ -5,7 +5,7 @@ import { orders } from "../db/schema.js";
 import { sql } from "drizzle-orm";
 import Stripe from "stripe";
 
-vi.mock("../features/payments/stripe-client.js", () => ({
+vi.mock("../shared/payments/stripe-client.js", () => ({
   stripe: {
     accounts: {
       create: vi.fn().mockResolvedValue({ id: "acct_test123" }),
@@ -118,7 +118,7 @@ async function createListing() {
 
 describe("POST /api/v1/webhooks/stripe", () => {
   async function sendWebhook(event: Record<string, unknown>) {
-    const { stripe } = await import("../features/payments/stripe-client.js");
+    const { stripe } = await import("../shared/payments/stripe-client.js");
     const payload = JSON.stringify(event);
     const sig = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_test" });
     return request(app)

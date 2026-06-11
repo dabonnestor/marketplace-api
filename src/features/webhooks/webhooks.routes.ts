@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { stripe } from "../payments/stripe-client.js";
+import { stripe } from "../../shared/payments/stripe-client.js";
 import { config } from "../../shared/config.js";
 import { logger } from "../../shared/logger.js";
 import { asyncHandler } from "../../shared/middleware/async-handler.js";

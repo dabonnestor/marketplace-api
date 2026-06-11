@@ -3,7 +3,7 @@ import { eq, and, sql, gte, lte, desc } from "drizzle-orm";
 import { AppError, NotFoundError } from "../../shared/errors.js";
 import { ensureOwner } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
-import { stripe } from "../payments/stripe-client.js";
+import { stripe } from "../../shared/payments/stripe-client.js";
 import { resolveListingStatus } from "../../shared/reservation.js";
 import type { CreateListingInput, UpdateListingInput, ListListingsQuery } from "./listings.schemas.js";
 

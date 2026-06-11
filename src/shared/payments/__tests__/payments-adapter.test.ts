@@ -26,7 +26,7 @@ vi.mock("../stripe-client.js", () => ({
   },
 }));
 
-vi.mock("../../../shared/errors.js", () => ({
+vi.mock("../../errors.js", () => ({
   AppError: class AppError extends Error {
     statusCode: number;
     code: string;
@@ -38,7 +38,7 @@ vi.mock("../../../shared/errors.js", () => ({
   },
 }));
 
-vi.mock("../../../shared/logger.js", () => ({
+vi.mock("../../logger.js", () => ({
   logger: { error: (...args: any[]) => mockLoggerError(...args) },
 }));
 

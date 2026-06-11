@@ -2,8 +2,8 @@ import Stripe from "stripe";
 import { stripe } from "./stripe-client.js";
 import { toCents } from "./amount-utils.js";
 import { mapStripeError } from "./error-mapping.js";
-import { AppError } from "../../shared/errors.js";
-import { logger } from "../../shared/logger.js";
+import { AppError } from "../errors.js";
+import { logger } from "../logger.js";
 
 export async function createPaymentIntent(params: {
   idempotencyKey: string;

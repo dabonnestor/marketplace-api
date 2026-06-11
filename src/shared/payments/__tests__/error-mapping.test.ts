@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Stripe from "stripe";
 import { mapStripeError } from "../error-mapping.js";
-import { AppError } from "../../../shared/errors.js";
+import { AppError } from "../../errors.js";
 
 // Mock logger so we can assert logging without side effects
-vi.mock("../../../shared/logger.js", () => ({
+vi.mock("../../logger.js", () => ({
   logger: { error: vi.fn() },
 }));
 
 let logger: { error: ReturnType<typeof vi.fn> };
 
 beforeEach(async () => {
-  const mod = await import("../../../shared/logger.js");
+  const mod = await import("../../logger.js");
   logger = mod.logger as unknown as { error: ReturnType<typeof vi.fn> };
   logger.error.mockClear();
 });

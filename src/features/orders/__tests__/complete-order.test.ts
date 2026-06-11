@@ -9,7 +9,7 @@ const mockDbSelectLimit = vi.fn();
 const mockDbUpdateSet = vi.fn();
 const mockDbUpdateWhere = vi.fn();
 
-vi.mock("../../payments/payments-adapter.js", () => ({
+vi.mock("../../../shared/payments/payments-adapter.js", () => ({
   createTransfer: (...args: any[]) => mockTransfersCreate(...args),
 }));
 
