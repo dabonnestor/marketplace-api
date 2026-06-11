@@ -1,30 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockReturningFn = vi.fn();
-const mockUpdateSetData = vi.fn();
+const mockDbSelect = vi.fn();
+const mockDbUpdateSet = vi.fn();
+const mockDbUpdateWhere = vi.fn();
 
 vi.mock("../../../db/index.js", () => {
   const eq = (a: any, b: any) => ({ type: "eq", left: a, right: b });
   const and = (...args: any[]) => ({ type: "and", args });
-  const lt = (a: any, b: any) => ({ type: "lt", left: a, right: b });
   return {
     db: {
       select: () => ({
         from: (_table: any) => ({
           where: (_cond: any) => ({
-            limit: (_n: number) => ({
-              then: (resolve: any) => resolve(mockReturningFn()),
-            }),
+            limit: (_n: number) => mockDbSelect(),
           }),
         }),
       }),
       update: (_table: any) => ({
         set: (data: any) => {
-          mockUpdateSetData(data);
+          mockDbUpdateSet(data);
           return {
-            where: (_cond: any) => ({
-              returning: () => mockReturningFn(),
-            }),
+            where: (_cond: any) => mockDbUpdateWhere(),
           };
         },
       }),
@@ -45,11 +41,10 @@ vi.mock("../../../db/index.js", () => {
     },
     eq,
     and,
-    lt,
   };
 });
 
-const { resolveListingReservation, expireIfStale } = await import("../expiry.js");
+const { resolveListingReservation, expireIfStale, ORDER_EXPIRY_MS } = await import("../expiry.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -57,51 +52,62 @@ beforeEach(() => {
 
 describe("resolveListingReservation", () => {
   it("returns the current status for a non-reserved listing (active)", async () => {
-    mockReturningFn.mockResolvedValueOnce([{ id: "listing_1", status: "active" }]);
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "active" }]);
 
     const result = await resolveListingReservation("listing_1");
 
     expect(result).toBe("active");
   });
 
-  it("releases an expired reservation when the atomic update succeeds", async () => {
-    // 1st select: fetch listing (reserved)
-    mockReturningFn.mockResolvedValueOnce([{ id: "listing_1", status: "reserved" }]);
+  it("releases an expired reservation and returns active", async () => {
+    const now = Date.now();
+    const expiredDate = new Date(now - ORDER_EXPIRY_MS - 1000);
+
+    // 1st select: fetch listing
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "reserved" }]);
     // 2nd select: getPendingOrderOnListing
-    mockReturningFn.mockResolvedValueOnce([
-      { id: "order_1", listingId: "listing_1", status: "pending" },
+    mockDbSelect.mockResolvedValueOnce([
+      { id: "order_1", listingId: "listing_1", status: "pending", createdAt: expiredDate },
     ]);
-    // Atomic update: returning() returns the expired order
-    mockReturningFn.mockResolvedValueOnce([{ id: "order_1" }]);
+
+    // update mocks
+    mockDbUpdateWhere.mockResolvedValue(undefined);
 
     const result = await resolveListingReservation("listing_1");
 
     expect(result).toBe("active");
-    expect(mockUpdateSetData).toHaveBeenCalledWith({
+
+    // Verify order was expired
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({
       status: "expired",
       updatedAt: expect.any(Date),
     });
-    expect(mockUpdateSetData).toHaveBeenCalledWith({
+
+    // Verify listing was released
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({
       status: "active",
       updatedAt: expect.any(Date),
     });
   });
 
-  it("returns reserved when the atomic update does not match (order not stale)", async () => {
-    mockReturningFn.mockResolvedValueOnce([{ id: "listing_1", status: "reserved" }]);
-    mockReturningFn.mockResolvedValueOnce([
-      { id: "order_1", listingId: "listing_1", status: "pending" },
+  it("returns reserved when the pending order has not yet expired", async () => {
+    const now = Date.now();
+    const freshDate = new Date(now - 60_000); // 1 minute ago — well within 30 min window
+
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "reserved" }]);
+    mockDbSelect.mockResolvedValueOnce([
+      { id: "order_1", listingId: "listing_1", status: "pending", createdAt: freshDate },
     ]);
-    // Atomic update returns empty — order not expired per DB clock
-    mockReturningFn.mockResolvedValueOnce([]);
 
     const result = await resolveListingReservation("listing_1");
 
     expect(result).toBe("reserved");
+    // No updates should have been triggered
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
   });
 
   it("passes through non-reserved status unchanged (sold)", async () => {
-    mockReturningFn.mockResolvedValueOnce([{ id: "listing_1", status: "sold" }]);
+    mockDbSelect.mockResolvedValueOnce([{ id: "listing_1", status: "sold" }]);
 
     const result = await resolveListingReservation("listing_1");
 
@@ -109,7 +115,7 @@ describe("resolveListingReservation", () => {
   });
 
   it("returns 'not_found' when the listing does not exist", async () => {
-    mockReturningFn.mockResolvedValueOnce([]);
+    mockDbSelect.mockResolvedValueOnce([]);
 
     const result = await resolveListingReservation("nonexistent");
 
@@ -118,37 +124,45 @@ describe("resolveListingReservation", () => {
 });
 
 describe("expireIfStale", () => {
-  it("returns true when the atomic update matches (order is pending and stale per DB)", async () => {
-    mockReturningFn.mockResolvedValueOnce([{ id: "order_1" }]);
+  it("releases and returns true for a pending order that has expired", async () => {
+    const now = Date.now();
+    const expiredDate = new Date(now - ORDER_EXPIRY_MS - 1000);
+    const order = { id: "order_1", listingId: "listing_1", status: "pending", createdAt: expiredDate };
 
-    const order = { id: "order_1", listingId: "listing_1", status: "pending" };
+    mockDbUpdateWhere.mockResolvedValue(undefined);
+
     const result = await expireIfStale(order);
 
     expect(result).toBe(true);
-    expect(mockUpdateSetData).toHaveBeenCalledWith({
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({
       status: "expired",
       updatedAt: expect.any(Date),
     });
-    expect(mockUpdateSetData).toHaveBeenCalledWith({
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({
       status: "active",
       updatedAt: expect.any(Date),
     });
   });
 
-  it("returns false when the atomic update does not match (not stale per DB)", async () => {
-    mockReturningFn.mockResolvedValueOnce([]);
+  it("returns false for a pending order that has not yet expired", async () => {
+    const now = Date.now();
+    const freshDate = new Date(now - 60_000);
+    const order = { id: "order_1", listingId: "listing_1", status: "pending", createdAt: freshDate };
 
-    const order = { id: "order_1", listingId: "listing_1", status: "pending" };
     const result = await expireIfStale(order);
 
     expect(result).toBe(false);
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
   });
 
-  it("returns false for a non-pending order without touching the DB", async () => {
-    const order = { id: "order_1", listingId: "listing_1", status: "paid" };
+  it("returns false for a non-pending order even if old", async () => {
+    const now = Date.now();
+    const oldDate = new Date(now - ORDER_EXPIRY_MS - 1000);
+    const order = { id: "order_1", listingId: "listing_1", status: "paid", createdAt: oldDate };
+
     const result = await expireIfStale(order);
 
     expect(result).toBe(false);
-    expect(mockReturningFn).not.toHaveBeenCalled();
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
   });
 });
