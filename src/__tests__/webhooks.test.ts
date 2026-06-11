@@ -168,6 +168,48 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(getOrder.body.paidAt).toBeDefined();
   });
 
+  it("expires the order on payment_intent.succeeded when the pending order is stale", async () => {
+    const listing = await createListing();
+    const order = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", `Bearer ${buyerToken}`)
+      .send({ listingId: listing.id });
+
+    // Backdate the order past the expiry window
+    const expiredDate = new Date(Date.now() - 31 * 60 * 1000);
+    const db = getDb();
+    await db
+      .update(orders)
+      .set({ createdAt: expiredDate })
+      .where(sql`id = ${order.body.id}`);
+
+    const res = await sendWebhook({
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: order.body.stripePaymentIntentId,
+          status: "succeeded",
+          metadata: {
+            order_id: order.body.id,
+          },
+        },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ received: true });
+
+    // Order should be expired, not paid
+    const getOrder = await request(app)
+      .get(`/api/v1/orders/${order.body.id}`)
+      .set("Authorization", `Bearer ${buyerToken}`);
+    expect(getOrder.body.status).toBe("expired");
+
+    // Listing should be released
+    const getListing = await request(app).get(`/api/v1/listings/${listing.id}`);
+    expect(getListing.body.status).toBe("active");
+  });
+
   it("transitions to disputed and stores preDisputeStatus on charge.dispute.created", async () => {
     const listing = await createListing();
     const order = await request(app)

@@ -4,6 +4,7 @@ import { db, schema } from "../../db/index.js";
 import { logger } from "../../shared/logger.js";
 import { transition, type OrderStatus } from "../orders/state-machine.js";
 import { executeTransition } from "../orders/orders.service.js";
+import { expireIfStale } from "../orders/expiry.js";
 
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {
@@ -48,6 +49,11 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
 
   if (!order) {
     logger.warn({ orderId }, "payment_intent.succeeded webhook received for unknown order");
+    return;
+  }
+
+  if (await expireIfStale(order)) {
+    logger.info({ orderId }, "payment_intent.succeeded webhook: order expired, transitioned to expired");
     return;
   }
 
