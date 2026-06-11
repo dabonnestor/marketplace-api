@@ -6,7 +6,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from "../../shared/errors.js";
-import { ensureParticipant } from "../../shared/guards.js";
+
 import { paginate } from "../../shared/pagination.js";
 import { calculateOrderBreakdown } from "./commission.js";
 import { transition, type OrderStatus } from "./state-machine.js";
@@ -232,7 +232,9 @@ export async function getOrder(orderId: string, userId: string) {
     throw new NotFoundError("Order", orderId);
   }
 
-  ensureParticipant(order, userId);
+  if (order.buyerId !== userId && order.sellerId !== userId) {
+    throw new ForbiddenError("You are not a participant in this order");
+  }
 
   // For pending orders, include the stored client_secret so the frontend
   // can re-mount the Stripe PaymentElement after a page refresh.
