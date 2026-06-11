@@ -10,9 +10,15 @@ import { ensureParticipant } from "../../shared/guards.js";
 import { paginate } from "../../shared/pagination.js";
 import { calculateOrderBreakdown } from "./commission.js";
 import { transition, type OrderStatus } from "./state-machine.js";
-import { stripe } from "../payments/stripe-client.js";
-import { toCents } from "../payments/amount-utils.js";
-import { mapStripeError } from "../payments/error-mapping.js";
+import {
+  createPaymentIntent,
+  retrievePaymentIntent,
+  confirmPaymentIntent,
+  cancelPaymentIntent,
+  createRefund,
+  createTransfer,
+} from "../payments/payments-adapter.js";
+import { logger } from "../../shared/logger.js";
 import { resolveListingReservation, expireIfStale } from "./expiry.js";
 
 export async function createOrGetPaymentIntent(order: {
@@ -22,37 +28,23 @@ export async function createOrGetPaymentIntent(order: {
   sellerId: string;
   listingId: string;
 }) {
-  try {
-    const paymentIntent = await stripe.paymentIntents.create(
-      {
-        amount: toCents(order.total),
-        currency: "usd",
-        capture_method: "automatic",
-        payment_method_types: ["card"],
-        metadata: {
-          order_id: order.id,
-          buyer_id: order.buyerId,
-          seller_id: order.sellerId,
-          listing_id: order.listingId,
-        },
-      },
-      { idempotencyKey: order.id },
-    );
+  const { id, clientSecret } = await createPaymentIntent({
+    idempotencyKey: order.id,
+    amount: order.total,
+    metadata: {
+      order_id: order.id,
+      buyer_id: order.buyerId,
+      seller_id: order.sellerId,
+      listing_id: order.listingId,
+    },
+  });
 
-    const clientSecret = paymentIntent.client_secret ?? null;
+  await db
+    .update(schema.orders)
+    .set({ stripePaymentIntentId: id, stripeClientSecret: clientSecret, updatedAt: new Date() })
+    .where(eq(schema.orders.id, order.id));
 
-    await db
-      .update(schema.orders)
-      .set({ stripePaymentIntentId: paymentIntent.id, stripeClientSecret: clientSecret, updatedAt: new Date() })
-      .where(eq(schema.orders.id, order.id));
-
-    return {
-      id: paymentIntent.id,
-      clientSecret,
-    };
-  } catch (err) {
-    throw mapStripeError(err);
-  }
+  return { id, clientSecret };
 }
 
 export async function createOrder(buyerId: string, listingId: string) {
@@ -173,20 +165,16 @@ export async function payOrder(orderId: string, userId: string) {
     stripePaymentIntentId = pi.id;
   }
 
-  try {
-    const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
+  const pi = await retrievePaymentIntent(stripePaymentIntentId);
 
-    if (pi.status === "requires_confirmation") {
-      await stripe.paymentIntents.confirm(stripePaymentIntentId);
-    } else if (pi.status !== "succeeded" && pi.status !== "processing") {
-      throw new AppError(
-        400,
-        "PAYMENT_NOT_CONFIRMED",
-        `PaymentIntent status is '${pi.status}'. Complete payment on the frontend first.`,
-      );
-    }
-  } catch (err) {
-    throw mapStripeError(err);
+  if (pi.status === "requires_confirmation") {
+    await confirmPaymentIntent(stripePaymentIntentId);
+  } else if (pi.status !== "succeeded" && pi.status !== "processing") {
+    throw new AppError(
+      400,
+      "PAYMENT_NOT_CONFIRMED",
+      `PaymentIntent status is '${pi.status}'. Complete payment on the frontend first.`,
+    );
   }
 
   // Re-read after Stripe confirmation — the payment_intent.succeeded
@@ -196,7 +184,7 @@ export async function payOrder(orderId: string, userId: string) {
     return current;
   }
 
-  return transitionStatus(orderId, "paid", userId);
+  return transitionOrder(current, "paid", { userId });
 }
 
 export async function cancelOrder(orderId: string, userId: string) {
@@ -218,14 +206,10 @@ export async function cancelOrder(orderId: string, userId: string) {
 
   // Cancel the PaymentIntent if exists
   if (order.stripePaymentIntentId) {
-    try {
-      await stripe.paymentIntents.cancel(order.stripePaymentIntentId);
-    } catch (err) {
-      throw mapStripeError(err);
-    }
+    await cancelPaymentIntent(order.stripePaymentIntentId);
   }
 
-  const updated = await transitionStatus(orderId, "cancelled", userId);
+  const updated = await transitionOrder(order, "cancelled", { userId });
 
   // Release the listing
   await db
@@ -258,7 +242,44 @@ export async function getOrder(orderId: string, userId: string) {
   return order;
 }
 
-export async function executeTransition(
+export async function transitionOrder(
+  order: { id: string; status: string; buyerId: string; sellerId: string; preDisputeStatus?: string | null },
+  newStatus: OrderStatus,
+  options?: { userId?: string; extraUpdates?: Record<string, unknown> },
+) {
+  const currentStatus = order.status as OrderStatus;
+
+  let role: "buyer" | "seller" | undefined;
+  if (options?.userId) {
+    // Re-check participant since we already validated in getOrder for user paths
+    if (order.buyerId !== options.userId && order.sellerId !== options.userId) {
+      throw new ForbiddenError("You are not a participant in this order");
+    }
+    role = order.buyerId === options.userId ? "buyer" : "seller";
+  }
+
+  const result = transition(
+    currentStatus,
+    newStatus,
+    role,
+    order.preDisputeStatus as OrderStatus | undefined,
+  );
+
+  if (!result.allowed) {
+    if (result.errorCode === "FORBIDDEN") {
+      throw new ForbiddenError(result.error!);
+    }
+    throw new AppError(
+      400,
+      result.errorCode ?? "INVALID_TRANSITION",
+      result.error!,
+    );
+  }
+
+  return executeTransition(order.id, newStatus, result, options?.extraUpdates);
+}
+
+async function executeTransition(
   orderId: string,
   newStatus: OrderStatus,
   result: { allowed: boolean; timestampField?: string },
@@ -288,28 +309,7 @@ export async function transitionStatus(
   userId: string,
 ) {
   const order = await getOrder(orderId, userId);
-  const currentStatus = order.status as OrderStatus;
-  const role = order.buyerId === userId ? "buyer" : "seller";
-
-  const result = transition(
-    currentStatus,
-    newStatus,
-    role,
-    order.preDisputeStatus as OrderStatus | undefined,
-  );
-
-  if (!result.allowed) {
-    if (result.errorCode === "FORBIDDEN") {
-      throw new ForbiddenError(result.error!);
-    }
-    throw new AppError(
-      400,
-      result.errorCode ?? "INVALID_TRANSITION",
-      result.error!,
-    );
-  }
-
-  return executeTransition(orderId, newStatus, result);
+  return transitionOrder(order, newStatus, { userId });
 }
 
 export async function listBuyerOrders(
@@ -391,18 +391,12 @@ export async function refundOrder(orderId: string, userId: string) {
     throw new ForbiddenError("Only the buyer can request a refund");
   }
 
-  let stripeRefundId: string;
-  try {
-    const refund = await stripe.refunds.create({
-      payment_intent: order.stripePaymentIntentId!,
-      amount: toCents(order.total),
-    });
-    stripeRefundId = refund.id;
-  } catch (err) {
-    throw mapStripeError(err);
-  }
+  const { id: stripeRefundId } = await createRefund({
+    paymentIntentId: order.stripePaymentIntentId!,
+    amount: order.total,
+  });
 
-  const updated = await transitionStatus(orderId, "refunded", userId);
+  const updated = await transitionOrder(order, "refunded", { userId });
 
   await db
     .update(schema.orders)
@@ -410,4 +404,38 @@ export async function refundOrder(orderId: string, userId: string) {
     .where(eq(schema.orders.id, orderId));
 
   return { ...updated, stripeRefundId };
+}
+
+export async function completeOrder(orderId: string, userId: string) {
+  const order = await getOrder(orderId, userId);
+
+  const [seller] = await db
+    .select({ stripeAccountId: schema.users.stripeAccountId })
+    .from(schema.users)
+    .where(eq(schema.users.id, order.sellerId))
+    .limit(1);
+
+  if (!seller?.stripeAccountId) {
+    logger.error({ orderId, sellerId: order.sellerId }, "Seller has no Stripe account");
+    throw new AppError(502, "TRANSFER_FAILED", "Stripe transfer failed");
+  }
+
+  const { id: stripeTransferId } = await createTransfer({
+    amount: order.sellerPayout,
+    destination: seller.stripeAccountId,
+    metadata: {
+      order_id: order.id,
+      buyer_id: order.buyerId,
+      seller_id: order.sellerId,
+    },
+  });
+
+  const updated = await transitionOrder(order, "completed", { userId });
+
+  await db
+    .update(schema.orders)
+    .set({ stripeTransferId, updatedAt: new Date() })
+    .where(eq(schema.orders.id, orderId));
+
+  return { ...updated, stripeTransferId };
 }
