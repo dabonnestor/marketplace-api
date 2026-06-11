@@ -1,7 +1,6 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and, sql, gte, lte, desc } from "drizzle-orm";
-import { AppError, NotFoundError } from "../../shared/errors.js";
-import { ensureOwner } from "../../shared/guards.js";
+import { AppError, ForbiddenError, NotFoundError } from "../../shared/errors.js";
 import { paginate } from "../../shared/pagination.js";
 import { stripe } from "../../shared/payments/stripe-client.js";
 import { resolveListingStatus } from "../../shared/reservation.js";
@@ -66,7 +65,9 @@ export async function getById(id: string) {
 export async function update(id: string, data: UpdateListingInput, sellerId: string) {
   const listing = await getById(id);
 
-  ensureOwner(listing, sellerId);
+  if (listing.sellerId !== sellerId) {
+    throw new ForbiddenError("You can only modify your own resource");
+  }
 
   const setData: Record<string, unknown> = { updatedAt: new Date() };
   if (data.title !== undefined) setData.title = data.title;
@@ -89,7 +90,9 @@ export async function update(id: string, data: UpdateListingInput, sellerId: str
 export async function remove(id: string, sellerId: string) {
   const listing = await getById(id);
 
-  ensureOwner(listing, sellerId);
+  if (listing.sellerId !== sellerId) {
+    throw new ForbiddenError("You can only modify your own resource");
+  }
 
   await db.delete(schema.listings).where(eq(schema.listings.id, id));
 }

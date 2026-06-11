@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockTransfersCreate = vi.fn();
-const mockEnsureParticipant = vi.fn();
 const mockLoggerError = vi.fn();
 
 // DB mocks
@@ -15,10 +14,6 @@ vi.mock("../../../shared/payments/payments-adapter.js", () => ({
 
 vi.mock("../../../shared/logger.js", () => ({
   logger: { error: (...args: any[]) => mockLoggerError(...args) },
-}));
-
-vi.mock("../../../shared/guards.js", () => ({
-  ensureParticipant: (...args: any[]) => mockEnsureParticipant(...args),
 }));
 
 vi.mock("../../../shared/errors.js", () => ({

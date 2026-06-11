@@ -11,11 +11,6 @@ vi.mock("../../../shared/payments/stripe-client.js", () => ({
   },
 }));
 
-const mockEnsureParticipant = vi.fn();
-vi.mock("../../../shared/guards.js", () => ({
-  ensureParticipant: (...args: any[]) => mockEnsureParticipant(...args),
-}));
-
 vi.mock("../../../shared/errors.js", () => ({
   AppError: class AppError extends Error {
     statusCode: number;
