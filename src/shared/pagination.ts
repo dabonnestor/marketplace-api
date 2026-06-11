@@ -8,8 +8,8 @@ export interface PaginatedResult<T> {
   };
 }
 
-export async function paginate<T>(
-  dataQuery: any,
+export async function paginate<T extends Record<string, unknown>>(
+  dataQuery: Promise<T[]> & { limit(n: number): any; offset(n: number): any },
   countQuery: any,
   page: number,
   limit: number,
