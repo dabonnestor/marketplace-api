@@ -3,35 +3,7 @@ import { eq, and, sql } from "drizzle-orm";
 
 export const ORDER_EXPIRY_MINUTES = 30;
 
-export async function expireOrderAndReleaseListing(
-  orderId: string,
-  listingId: string,
-) {
-  await db
-    .update(schema.orders)
-    .set({ status: "expired", updatedAt: new Date() })
-    .where(eq(schema.orders.id, orderId));
-  await db
-    .update(schema.listings)
-    .set({ status: "active", updatedAt: new Date() })
-    .where(eq(schema.listings.id, listingId));
-}
-
-export async function getPendingOrderOnListing(listingId: string) {
-  const [order] = await db
-    .select()
-    .from(schema.orders)
-    .where(
-      and(
-        eq(schema.orders.listingId, listingId),
-        eq(schema.orders.status, "pending"),
-      ),
-    )
-    .limit(1);
-  return order ?? null;
-}
-
-export async function expireOrderAndReleaseListingIfStale(
+async function expireOrderAndReleaseListingIfStale(
   orderId: string,
   listingId: string,
 ): Promise<boolean> {
