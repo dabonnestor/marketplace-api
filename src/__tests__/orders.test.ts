@@ -5,7 +5,7 @@ import { orders } from "../db/schema.js";
 import { sql } from "drizzle-orm";
 import Stripe from "stripe";
 
-vi.mock("../features/payments/stripe-client.js", () => ({
+vi.mock("../shared/payments/stripe-client.js", () => ({
   stripe: {
     accounts: {
       create: vi.fn().mockResolvedValue({ id: "acct_test123" }),
@@ -328,7 +328,7 @@ describe("POST /api/v1/orders/:id/pay", () => {
       .set("Authorization", `Bearer ${buyerToken}`)
       .send({ listingId: listing.id });
 
-    const { stripe } = await import("../features/payments/stripe-client.js");
+    const { stripe } = await import("../shared/payments/stripe-client.js");
     const cardError = Object.assign(
       Object.create(Stripe.errors.StripeCardError.prototype),
       {
@@ -355,7 +355,7 @@ describe("POST /api/v1/orders/:id/pay", () => {
       .set("Authorization", `Bearer ${buyerToken}`)
       .send({ listingId: listing.id });
 
-    const { stripe } = await import("../features/payments/stripe-client.js");
+    const { stripe } = await import("../shared/payments/stripe-client.js");
     const apiError = Object.assign(
       Object.create(Stripe.errors.StripeAPIError.prototype),
       {
@@ -386,7 +386,7 @@ describe("POST /api/v1/orders/:id/pay", () => {
       .post(`/api/v1/orders/${order.body.id}/pay`)
       .set("Authorization", `Bearer ${buyerToken}`);
 
-    const { stripe } = await import("../features/payments/stripe-client.js");
+    const { stripe } = await import("../shared/payments/stripe-client.js");
     const confirmCallsBefore = vi.mocked(stripe.paymentIntents.confirm).mock.calls.length;
 
     // Pay again — idempotent, returns the already-paid order without hitting Stripe
@@ -426,7 +426,7 @@ describe("POST /api/v1/orders/:id/pay", () => {
       .set("Authorization", `Bearer ${buyerToken}`)
       .send({ listingId: listing.id });
 
-    const { stripe } = await import("../features/payments/stripe-client.js");
+    const { stripe } = await import("../shared/payments/stripe-client.js");
     const db = getDb();
 
     // Simulate the webhook race: when confirm() is called, the webhook
@@ -743,7 +743,7 @@ describe("completed transfer", () => {
       expect(completed.body.stripeTransferId).toBe("tr_test123");
 
       // Verify the transfer was created with correct params
-      const { stripe } = await import("../features/payments/stripe-client.js");
+      const { stripe } = await import("../shared/payments/stripe-client.js");
       expect(stripe.transfers.create).toHaveBeenCalledWith({
         amount: 9500, // sellerPayout $95.00 in cents
         currency: "usd",
@@ -779,7 +779,7 @@ describe("completed transfer", () => {
         .send({ status: "delivered" });
 
       // Simulate transfer failure
-      const { stripe } = await import("../features/payments/stripe-client.js");
+      const { stripe } = await import("../shared/payments/stripe-client.js");
       const apiError = Object.assign(
         Object.create(Stripe.errors.StripeAPIError.prototype),
         {
@@ -1112,7 +1112,7 @@ describe("POST /api/v1/orders/:id/refund", () => {
       .post(`/api/v1/orders/${order.body.id}/pay`)
       .set("Authorization", `Bearer ${buyerToken}`);
 
-    const { stripe } = await import("../features/payments/stripe-client.js");
+    const { stripe } = await import("../shared/payments/stripe-client.js");
     const apiError = Object.assign(
       Object.create(Stripe.errors.StripeAPIError.prototype),
       {

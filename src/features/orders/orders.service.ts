@@ -17,7 +17,7 @@ import {
   cancelPaymentIntent,
   createRefund,
   createTransfer,
-} from "../payments/payments-adapter.js";
+} from "../../shared/payments/payments-adapter.js";
 import { logger } from "../../shared/logger.js";
 import { resolveListingStatus } from "../../shared/reservation.js";
 import { expireIfStale } from "./expiry.js";

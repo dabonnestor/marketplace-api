@@ -3,7 +3,7 @@ import Stripe from "stripe";
 
 // Mock stripe before importing the module under test
 const mockCreate = vi.fn();
-vi.mock("../../payments/stripe-client.js", () => ({
+vi.mock("../../../shared/payments/stripe-client.js", () => ({
   stripe: {
     paymentIntents: {
       create: (...args: any[]) => mockCreate(...args),
