@@ -6,11 +6,11 @@ const mockExpireIfStale = vi.fn();
 const mockLoggerInfo = vi.fn();
 const mockLoggerWarn = vi.fn();
 
-vi.mock("../../orders/orders.service.js", () => ({
+vi.mock("../../../shared/order-lifecycle/transition-order.js", () => ({
   transitionOrder: (...args: any[]) => mockTransitionOrder(...args),
 }));
 
-vi.mock("../../orders/expiry.js", () => ({
+vi.mock("../../../shared/order-lifecycle/expiry.js", () => ({
   expireIfStale: (...args: any[]) => mockExpireIfStale(...args),
 }));
 

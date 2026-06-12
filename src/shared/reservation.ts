@@ -1,6 +1,6 @@
 import { db, schema } from "../db/index.js";
 import { eq, and } from "drizzle-orm";
-import { expireIfStale } from "../features/orders/expiry.js";
+import { expireIfStale } from "./order-lifecycle/expiry.js";
 
 async function getPendingOrderOnListing(listingId: string) {
   const [order] = await db

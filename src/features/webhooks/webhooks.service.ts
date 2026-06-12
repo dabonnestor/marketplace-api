@@ -3,8 +3,8 @@ import Stripe from "stripe";
 import { db, schema } from "../../db/index.js";
 import { logger } from "../../shared/logger.js";
 import { AppError } from "../../shared/errors.js";
-import { transitionOrder } from "../orders/orders.service.js";
-import { expireIfStale } from "../orders/expiry.js";
+import { transitionOrder } from "../../shared/order-lifecycle/transition-order.js";
+import { expireIfStale } from "../../shared/order-lifecycle/expiry.js";
 
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {

@@ -52,7 +52,7 @@ vi.mock("../../../db/index.js", () => {
   };
 });
 
-const { expireIfStale, ORDER_EXPIRY_MINUTES } = await import("../expiry.js");
+const { expireIfStale, ORDER_EXPIRY_MINUTES } = await import("../../../shared/order-lifecycle/expiry.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
