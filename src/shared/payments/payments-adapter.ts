@@ -66,6 +66,45 @@ export async function createRefund(params: {
   }
 }
 
+export async function retrieveAccount(accountId: string) {
+  try {
+    return await stripe.accounts.retrieve(accountId);
+  } catch (err) {
+    throw mapStripeError(err);
+  }
+}
+
+export async function createAccount() {
+  try {
+    return await stripe.accounts.create({
+      type: "express",
+      capabilities: {
+        transfers: { requested: true },
+        card_payments: { requested: true },
+      },
+    });
+  } catch (err) {
+    throw mapStripeError(err);
+  }
+}
+
+export async function createAccountLink(params: {
+  account: string;
+  refreshUrl: string;
+  returnUrl: string;
+}) {
+  try {
+    return await stripe.accountLinks.create({
+      account: params.account,
+      refresh_url: params.refreshUrl,
+      return_url: params.returnUrl,
+      type: "account_onboarding",
+    });
+  } catch (err) {
+    throw mapStripeError(err);
+  }
+}
+
 export async function createTransfer(params: {
   amount: string;
   destination: string;
