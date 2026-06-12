@@ -1,0 +1,26 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "./Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/health"
+preStartCommand = "node dist/db/migrate.js"
+numReplicas = 1
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[service]
+name = "marketplace-api"
+
+# ── Required secrets (set in Railway dashboard) ──────────────────────
+# DATABASE_URL            — provisioned automatically by Railway PostgreSQL
+# JWT_SECRET              — ≥32 chars, HS256 signing key for access tokens
+# JWT_REFRESH_SECRET      — ≥32 chars, HS256 signing key for refresh tokens
+# STRIPE_SECRET_KEY       — Stripe secret key (sk_live_… or sk_test_…)
+# STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret (whsec_…)
+#
+# ── With defaults (override as needed) ───────────────────────────────
+# NODE_ENV=production     — set to "production" for live deploys
+# PORT=8080               — container port
+# BASE_URL                — public URL of the API (e.g. https://api.example.com)
+# FRONTEND_URL            — public URL of the frontend (e.g. https://example.com)
