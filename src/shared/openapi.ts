@@ -1,9 +1,3 @@
-import { authPaths, authSchemas } from "../features/auth/openapi.js";
-import { listingPaths, listingSchemas } from "../features/listings/openapi.js";
-import { orderPaths, orderSchemas } from "../features/orders/openapi.js";
-import { sellerPaths, sellerSchemas } from "../features/seller/openapi.js";
-import { webhookPaths } from "../features/webhooks/openapi.js";
-
 const errorResponseSchema = {
   type: "object",
   properties: {
@@ -118,12 +112,3 @@ export function createOpenApiRegistry(): OpenApiRegistry {
     },
   };
 }
-
-const _registry = createOpenApiRegistry();
-_registry.register(authPaths, authSchemas);
-_registry.register(listingPaths, listingSchemas);
-_registry.register(orderPaths, orderSchemas);
-_registry.register(sellerPaths, sellerSchemas);
-_registry.register(webhookPaths, {});
-
-export const openApiSpec = _registry.build();
