@@ -163,52 +163,63 @@ src/
 │   └── migrations/     # SQL migrations
 ├── features/
 │   ├── auth/
+│   │   ├── index.ts          # Feature descriptor
 │   │   ├── auth.routes.ts    # Route handlers
 │   │   ├── auth.schemas.ts   # Zod schemas + OpenAPI
 │   │   ├── auth.service.ts   # Business logic
 │   │   └── openapi.ts        # Co-located OpenAPI paths
 │   ├── listings/
+│   │   ├── index.ts
 │   │   ├── listings.routes.ts
 │   │   ├── listings.schemas.ts
 │   │   ├── listings.service.ts
 │   │   └── openapi.ts
 │   ├── orders/
+│   │   ├── index.ts
 │   │   ├── orders.routes.ts
 │   │   ├── orders.schemas.ts
-│   │   ├── orders.service.ts
-│   │   ├── state-machine.ts  # Order lifecycle state machine
-│   │   ├── commission.ts     # 10% platform fee calculation
-│   │   ├── complete-order.ts # Completion + Stripe transfer
-│   │   ├── expiry.ts         # Pending order expiry (30 min, lazy cleanup)
+│   │   ├── orders.service.ts   # Public API (re-exports orchestration + queries)
+│   │   ├── orchestration.ts    # Order lifecycle operations
+│   │   ├── queries.ts          # Read-side queries (buyer purchases, seller sales)
+│   │   ├── commission.ts       # 10% platform fee calculation
 │   │   ├── openapi.ts
 │   │   └── __tests__/
-│   ├── payments/
-│   │   ├── stripe-client.ts  # Stripe SDK instance
-│   │   ├── amount-utils.ts   # Decimal ↔ cents conversion
-│   │   ├── error-mapping.ts  # Stripe error → AppError
-│   │   └── __tests__/
 │   ├── seller/
-│   │   ├── seller.routes.ts  # Seller onboarding routes
-│   │   ├── seller.service.ts # Stripe Connect onboarding
+│   │   ├── index.ts
+│   │   ├── seller.routes.ts    # Seller onboarding routes
+│   │   ├── seller.service.ts   # Stripe Connect onboarding
 │   │   └── openapi.ts
 │   └── webhooks/
-│       ├── webhooks.routes.ts # Stripe webhook receiver
+│       ├── index.ts
+│       ├── webhooks.routes.ts  # Stripe webhook receiver
 │       ├── webhooks.service.ts # Webhook event handling
 │       └── openapi.ts
 ├── shared/
-│   ├── config.ts       # Env var validation (Zod, crashes on missing vars)
-│   ├── errors.ts       # Custom error classes (AppError, NotFoundError, etc.)
-│   ├── guards.ts       # Ownership verification guards
-│   ├── logger.ts       # Pino logger
-│   ├── openapi.ts      # OpenAPI spec builder
-│   ├── pagination.ts   # Shared paginate helper
+│   ├── config.ts          # Env var validation (Zod, crashes on missing vars)
+│   ├── errors.ts          # Custom error classes (AppError, NotFoundError, etc.)
+│   ├── feature-registry.ts # Feature descriptor + OpenAPI registry
+│   ├── logger.ts          # Pino logger
+│   ├── openapi.ts         # OpenAPI spec builder
+│   ├── pagination.ts      # Shared paginate helper
+│   ├── reservation.ts     # Listing reservation management
+│   ├── order-lifecycle/
+│   │   ├── index.ts
+│   │   ├── state-machine.ts    # Order lifecycle state machine
+│   │   ├── expiry.ts           # Pending order expiry (30 min, lazy cleanup)
+│   │   └── transition-order.ts # Status transition executor
+│   ├── payments/
+│   │   ├── payments-adapter.ts # Consolidated Stripe operations adapter
+│   │   ├── stripe-client.ts    # Stripe SDK instance
+│   │   ├── amount-utils.ts     # Decimal ↔ cents conversion
+│   │   ├── error-mapping.ts    # Stripe error → AppError
+│   │   └── __tests__/
 │   ├── middleware/
 │   │   ├── async-handler.ts  # Async error boundary
 │   │   ├── auth.ts           # JWT auth middleware
 │   │   ├── error-handler.ts  # Global error handler
 │   │   └── validate.ts       # Zod request validation
 │   └── __tests__/
-└── __tests__/          # Feature integration tests
+└── __tests__/              # Feature integration tests
 ```
 
 ## Environment Variables
