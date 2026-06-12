@@ -1,7 +1,6 @@
 import { db, schema } from "../db/index.js";
-import { eq, and, sql } from "drizzle-orm";
-
-const ORDER_EXPIRY_MINUTES = 30;
+import { eq, and } from "drizzle-orm";
+import { expireIfStale } from "../features/orders/expiry.js";
 
 async function getPendingOrderOnListing(listingId: string) {
   const [order] = await db
@@ -15,32 +14,6 @@ async function getPendingOrderOnListing(listingId: string) {
     )
     .limit(1);
   return order ?? null;
-}
-
-async function expireOrderAndReleaseListingIfStale(
-  orderId: string,
-  listingId: string,
-): Promise<boolean> {
-  const [updated] = await db
-    .update(schema.orders)
-    .set({ status: "expired", updatedAt: new Date() })
-    .where(
-      and(
-        eq(schema.orders.id, orderId),
-        eq(schema.orders.status, "pending"),
-        sql`${schema.orders.createdAt} < now() - interval '${sql.raw(String(ORDER_EXPIRY_MINUTES))} minutes'`,
-      ),
-    )
-    .returning();
-
-  if (updated) {
-    await db
-      .update(schema.listings)
-      .set({ status: "active", updatedAt: new Date() })
-      .where(eq(schema.listings.id, listingId));
-    return true;
-  }
-  return false;
 }
 
 export async function resolveListingStatus(
@@ -59,10 +32,7 @@ export async function resolveListingStatus(
   if (listing.status === "reserved") {
     const pendingOrder = await getPendingOrderOnListing(listingId);
     if (pendingOrder) {
-      const expired = await expireOrderAndReleaseListingIfStale(
-        pendingOrder.id,
-        listingId,
-      );
+      const expired = await expireIfStale(pendingOrder);
       if (expired) return "active";
     }
   }
