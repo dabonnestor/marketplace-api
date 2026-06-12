@@ -1,6 +1,6 @@
 import { db, schema } from "../../db/index.js";
 import { eq } from "drizzle-orm";
-import { stripe } from "../../shared/payments/stripe-client.js";
+import { retrieveAccount, createAccount, createAccountLink } from "../../shared/payments/payments-adapter.js";
 import { config } from "../../shared/config.js";
 
 export async function getStatus(userId: string) {
@@ -14,7 +14,7 @@ export async function getStatus(userId: string) {
     return { onboarded: false, chargesEnabled: false, payoutsEnabled: false };
   }
 
-  const account = await stripe.accounts.retrieve(user.stripeAccountId);
+  const account = await retrieveAccount(user.stripeAccountId);
 
   return {
     onboarded: true,
@@ -33,13 +33,7 @@ export async function onboard(userId: string) {
   let accountId = user?.stripeAccountId ?? null;
 
   if (!accountId) {
-    const account = await stripe.accounts.create({
-      type: "express",
-      capabilities: {
-        transfers: { requested: true },
-        card_payments: { requested: true },
-      },
-    });
+    const account = await createAccount();
 
     accountId = account.id;
 
@@ -49,11 +43,10 @@ export async function onboard(userId: string) {
       .where(eq(schema.users.id, userId));
   }
 
-  const accountLink = await stripe.accountLinks.create({
+  const accountLink = await createAccountLink({
     account: accountId,
-    refresh_url: `${config.FRONTEND_URL}/dashboard/seller/onboard`,
-    return_url: `${config.FRONTEND_URL}/dashboard/seller/onboard`,
-    type: "account_onboarding",
+    refreshUrl: `${config.FRONTEND_URL}/dashboard/seller/onboard`,
+    returnUrl: `${config.FRONTEND_URL}/dashboard/seller/onboard`,
   });
 
   return { url: accountLink.url };

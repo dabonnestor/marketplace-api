@@ -2,7 +2,7 @@ import { db, schema } from "../../db/index.js";
 import { eq, and, sql, gte, lte, desc } from "drizzle-orm";
 import { AppError, ForbiddenError, NotFoundError } from "../../shared/errors.js";
 import { paginate } from "../../shared/pagination.js";
-import { stripe } from "../../shared/payments/stripe-client.js";
+import { retrieveAccount } from "../../shared/payments/payments-adapter.js";
 import { resolveListingStatus } from "../../shared/reservation.js";
 import type { CreateListingInput, UpdateListingInput, ListListingsQuery } from "./listings.schemas.js";
 
@@ -17,7 +17,7 @@ async function ensureOnboarded(sellerId: string) {
     throw new AppError(400, "ONBOARDING_REQUIRED", "Seller must complete Stripe Connect onboarding before creating listings");
   }
 
-  const account = await stripe.accounts.retrieve(user.stripeAccountId);
+  const account = await retrieveAccount(user.stripeAccountId);
 
   if (!account.charges_enabled) {
     throw new AppError(400, "ONBOARDING_REQUIRED", "Seller must complete Stripe Connect onboarding before creating listings");

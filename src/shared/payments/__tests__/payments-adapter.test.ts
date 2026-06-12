@@ -5,6 +5,9 @@ const mockPaymentIntentsCreate = vi.fn();
 const mockPaymentIntentsRetrieve = vi.fn();
 const mockPaymentIntentsConfirm = vi.fn();
 const mockPaymentIntentsCancel = vi.fn();
+const mockAccountsRetrieve = vi.fn();
+const mockAccountsCreate = vi.fn();
+const mockAccountLinksCreate = vi.fn();
 const mockRefundsCreate = vi.fn();
 const mockTransfersCreate = vi.fn();
 const mockLoggerError = vi.fn();
@@ -16,6 +19,13 @@ vi.mock("../stripe-client.js", () => ({
       retrieve: (...args: any[]) => mockPaymentIntentsRetrieve(...args),
       confirm: (...args: any[]) => mockPaymentIntentsConfirm(...args),
       cancel: (...args: any[]) => mockPaymentIntentsCancel(...args),
+    },
+    accounts: {
+      retrieve: (...args: any[]) => mockAccountsRetrieve(...args),
+      create: (...args: any[]) => mockAccountsCreate(...args),
+    },
+    accountLinks: {
+      create: (...args: any[]) => mockAccountLinksCreate(...args),
     },
     refunds: {
       create: (...args: any[]) => mockRefundsCreate(...args),
@@ -49,6 +59,9 @@ const {
   cancelPaymentIntent,
   createRefund,
   createTransfer,
+  retrieveAccount,
+  createAccount,
+  createAccountLink,
 } = await import("../payments-adapter.js");
 
 beforeEach(() => {
@@ -274,5 +287,86 @@ describe("createTransfer", () => {
     await expect(
       createTransfer({ amount: "10.00", destination: "acct_x", metadata: {} }),
     ).rejects.toThrow("network error");
+  });
+});
+
+// ── retrieveAccount ────────────────────────────────────────────
+
+describe("retrieveAccount", () => {
+  it("retrieves a Stripe account by ID and returns it", async () => {
+    const account = { id: "acct_123", charges_enabled: true, payouts_enabled: false };
+    mockAccountsRetrieve.mockResolvedValueOnce(account);
+
+    const result = await retrieveAccount("acct_123");
+
+    expect(mockAccountsRetrieve).toHaveBeenCalledWith("acct_123");
+    expect(result).toEqual(account);
+  });
+
+  it("maps Stripe errors through mapStripeError", async () => {
+    mockAccountsRetrieve.mockRejectedValueOnce(
+      new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
+    );
+
+    await expect(retrieveAccount("acct_123")).rejects.toThrow();
+  });
+});
+
+// ── createAccount ──────────────────────────────────────────────
+
+describe("createAccount", () => {
+  it("creates a Stripe Express account with transfers and card_payments capabilities", async () => {
+    const account = { id: "acct_xyz" };
+    mockAccountsCreate.mockResolvedValueOnce(account);
+
+    const result = await createAccount();
+
+    const [callArgs] = mockAccountsCreate.mock.calls[0];
+    expect(callArgs.type).toBe("express");
+    expect(callArgs.capabilities).toEqual({
+      transfers: { requested: true },
+      card_payments: { requested: true },
+    });
+    expect(result).toEqual(account);
+  });
+
+  it("maps Stripe errors through mapStripeError", async () => {
+    mockAccountsCreate.mockRejectedValueOnce(
+      new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
+    );
+
+    await expect(createAccount()).rejects.toThrow();
+  });
+});
+
+// ── createAccountLink ──────────────────────────────────────────
+
+describe("createAccountLink", () => {
+  it("creates an account link with the correct parameters", async () => {
+    const link = { url: "https://connect.stripe.com/setup/t" };
+    mockAccountLinksCreate.mockResolvedValueOnce(link);
+
+    const result = await createAccountLink({
+      account: "acct_xyz",
+      refreshUrl: "https://app.example/refresh",
+      returnUrl: "https://app.example/return",
+    });
+
+    const [callArgs] = mockAccountLinksCreate.mock.calls[0];
+    expect(callArgs.account).toBe("acct_xyz");
+    expect(callArgs.refresh_url).toBe("https://app.example/refresh");
+    expect(callArgs.return_url).toBe("https://app.example/return");
+    expect(callArgs.type).toBe("account_onboarding");
+    expect(result).toEqual(link);
+  });
+
+  it("maps Stripe errors through mapStripeError", async () => {
+    mockAccountLinksCreate.mockRejectedValueOnce(
+      new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
+    );
+
+    await expect(
+      createAccountLink({ account: "a", refreshUrl: "r", returnUrl: "u" }),
+    ).rejects.toThrow();
   });
 });
