@@ -1,3 +1,5 @@
+import { config } from "./config.js";
+
 const errorResponseSchema = {
   type: "object",
   properties: {
@@ -31,7 +33,7 @@ const baseInfo = {
 } as const;
 
 const baseServers = [
-  { url: "http://localhost:8080", description: "Local development" },
+  { url: config.BASE_URL, description: "Local development" },
 ] as const;
 
 const securitySchemes = {
