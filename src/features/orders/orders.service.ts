@@ -9,7 +9,7 @@ import {
 
 import { paginate } from "../../shared/pagination.js";
 import { calculateOrderBreakdown } from "./commission.js";
-import { transition, type OrderStatus } from "./state-machine.js";
+import { type OrderStatus } from "../../shared/order-lifecycle/state-machine.js";
 import {
   createPaymentIntent,
   retrievePaymentIntent,
@@ -20,7 +20,8 @@ import {
 } from "../../shared/payments/payments-adapter.js";
 import { logger } from "../../shared/logger.js";
 import { resolveListingStatus } from "../../shared/reservation.js";
-import { expireIfStale } from "./expiry.js";
+import { expireIfStale } from "../../shared/order-lifecycle/expiry.js";
+import { transitionOrder } from "../../shared/order-lifecycle/transition-order.js";
 
 export async function createOrGetPaymentIntent(order: {
   id: string;
@@ -243,67 +244,6 @@ export async function getOrder(orderId: string, userId: string) {
   }
 
   return order;
-}
-
-export async function transitionOrder(
-  order: { id: string; status: string; buyerId: string; sellerId: string; preDisputeStatus?: string | null },
-  newStatus: OrderStatus,
-  options?: { userId?: string; extraUpdates?: Record<string, unknown> },
-) {
-  const currentStatus = order.status as OrderStatus;
-
-  let role: "buyer" | "seller" | undefined;
-  if (options?.userId) {
-    // Re-check participant since we already validated in getOrder for user paths
-    if (order.buyerId !== options.userId && order.sellerId !== options.userId) {
-      throw new ForbiddenError("You are not a participant in this order");
-    }
-    role = order.buyerId === options.userId ? "buyer" : "seller";
-  }
-
-  const result = transition(
-    currentStatus,
-    newStatus,
-    role,
-    order.preDisputeStatus as OrderStatus | undefined,
-  );
-
-  if (!result.allowed) {
-    if (result.errorCode === "FORBIDDEN") {
-      throw new ForbiddenError(result.error!);
-    }
-    throw new AppError(
-      400,
-      result.errorCode ?? "INVALID_TRANSITION",
-      result.error!,
-    );
-  }
-
-  return executeTransition(order.id, newStatus, result, options?.extraUpdates);
-}
-
-async function executeTransition(
-  orderId: string,
-  newStatus: OrderStatus,
-  result: { allowed: boolean; timestampField?: string },
-  extraUpdates?: Record<string, unknown>,
-) {
-  const updates: Record<string, unknown> = {
-    status: newStatus,
-    updatedAt: new Date(),
-    ...extraUpdates,
-  };
-  if (result.timestampField) {
-    updates[result.timestampField] = new Date();
-  }
-
-  const [updated] = await db
-    .update(schema.orders)
-    .set(updates)
-    .where(eq(schema.orders.id, orderId))
-    .returning();
-
-  return updated;
 }
 
 export async function transitionStatus(
