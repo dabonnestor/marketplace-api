@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.*
+.git
+.gitignore
+src/__tests__
+docs
+*.md
+drizzle.config.ts
+vitest.config.ts
