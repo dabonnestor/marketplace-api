@@ -28,58 +28,102 @@ const paginationSchema = {
   },
 };
 
-export const openApiSpec = {
-  openapi: "3.0.3",
-  info: {
-    title: "Marketplace API",
-    version: "1.0.0",
-    description: "Two-sided marketplace for physical goods. Buyers browse listings and place orders. Sellers manage inventory and fulfill orders.",
-    contact: { name: "API Support" },
+const baseInfo = {
+  title: "Marketplace API",
+  version: "1.0.0",
+  description:
+    "Two-sided marketplace for physical goods. Buyers browse listings and place orders. Sellers manage inventory and fulfill orders.",
+  contact: { name: "API Support" },
+} as const;
+
+const baseServers = [
+  { url: "http://localhost:8080", description: "Local development" },
+] as const;
+
+const securitySchemes = {
+  bearerAuth: {
+    type: "http" as const,
+    scheme: "bearer" as const,
+    bearerFormat: "JWT",
   },
-  servers: [
-    { url: "http://localhost:8080", description: "Local development" },
-  ],
-  security: [{ bearerAuth: [] }],
-  components: {
-    securitySchemes: {
-      bearerAuth: {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "JWT",
-      },
-    },
-    schemas: {
-      ...authSchemas,
-      ...listingSchemas,
-      ...orderSchemas,
-      ...sellerSchemas,
-      Error: errorResponseSchema,
-      Pagination: paginationSchema,
-    },
-  },
-  paths: {
-    "/api/health": {
-      get: {
-        tags: ["Health"],
-        summary: "Health check",
-        security: [],
-        responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { type: "object", properties: { status: { type: "string" } } } } },
+};
+
+const healthCheckPath = {
+  "/api/health": {
+    get: {
+      tags: ["Health"],
+      summary: "Health check",
+      security: [],
+      responses: {
+        "200": {
+          description: "OK",
+          content: {
+            "application/json": {
+              schema: { type: "object" as const, properties: { status: { type: "string" as const } } },
+            },
           },
         },
       },
     },
-
-    ...authPaths,
-
-    ...listingPaths,
-
-    ...orderPaths,
-
-    ...sellerPaths,
-
-    ...webhookPaths,
   },
-};
+} as const;
+
+export interface OpenApiRegistry {
+  register(paths: Record<string, unknown>, schemas: Record<string, unknown>): void;
+  build(): {
+    openapi: string;
+    info: typeof baseInfo;
+    servers: typeof baseServers;
+    security: { bearerAuth: string[] }[];
+    components: {
+      securitySchemes: typeof securitySchemes;
+      schemas: Record<string, unknown>;
+    };
+    paths: Record<string, unknown>;
+  };
+}
+
+export function createOpenApiRegistry(): OpenApiRegistry {
+  const features: { paths: Record<string, unknown>; schemas: Record<string, unknown> }[] = [];
+
+  return {
+    register(paths: Record<string, unknown>, schemas: Record<string, unknown>) {
+      features.push({ paths, schemas });
+    },
+
+    build() {
+      const mergedPaths: Record<string, unknown> = { ...healthCheckPath };
+      const mergedSchemas: Record<string, unknown> = {};
+
+      for (const f of features) {
+        Object.assign(mergedPaths, f.paths);
+        Object.assign(mergedSchemas, f.schemas);
+      }
+
+      return {
+        openapi: "3.0.3",
+        info: baseInfo,
+        servers: baseServers,
+        security: [{ bearerAuth: [] }],
+        components: {
+          securitySchemes,
+          schemas: {
+            ...mergedSchemas,
+            Error: errorResponseSchema,
+            Pagination: paginationSchema,
+          },
+        },
+        paths: mergedPaths,
+      };
+    },
+  };
+}
+
+const _registry = createOpenApiRegistry();
+_registry.register(authPaths, authSchemas);
+_registry.register(listingPaths, listingSchemas);
+_registry.register(orderPaths, orderSchemas);
+_registry.register(sellerPaths, sellerSchemas);
+_registry.register(webhookPaths, {});
+
+export const openApiSpec = _registry.build();
