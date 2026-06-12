@@ -5,13 +5,15 @@ import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import swaggerUi from "swagger-ui-express";
 import { logger } from "./shared/logger.js";
-import { authRouter } from "./features/auth/auth.routes.js";
-import { listingsRouter } from "./features/listings/listings.routes.js";
-import { ordersRouter } from "./features/orders/orders.routes.js";
-import { sellerRouter } from "./features/seller/seller.routes.js";
-import { webhooksRouter } from "./features/webhooks/webhooks.routes.js";
-import { openApiSpec } from "./shared/openapi.js";
+import { registerFeatures } from "./shared/feature-registry.js";
+import { feature as auth } from "./features/auth/index.js";
+import { feature as listings } from "./features/listings/index.js";
+import { feature as orders } from "./features/orders/index.js";
+import { feature as seller } from "./features/seller/index.js";
+import { feature as webhooks } from "./features/webhooks/index.js";
 import { errorHandler } from "./shared/middleware/error-handler.js";
+
+const { mount, spec } = registerFeatures([auth, listings, orders, seller, webhooks]);
 
 export function createApp() {
   const app = express();
@@ -48,29 +50,17 @@ export function createApp() {
     }),
   );
 
-  // Auth rate limiter (stricter)
-  const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: process.env.NODE_ENV === "test" ? 1000 : 1000,
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-
   // Health check
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
   });
 
   // API docs
-  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
-  app.get("/api/docs.json", (_req, res) => res.json(openApiSpec));
+  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(spec));
+  app.get("/api/docs.json", (_req, res) => res.json(spec));
 
   // Routes
-  app.use("/api/v1/auth", authLimiter, authRouter);
-  app.use("/api/v1/listings", listingsRouter);
-  app.use("/api/v1/orders", ordersRouter);
-  app.use("/api/v1/seller", sellerRouter);
-  app.use("/api/v1/webhooks", webhooksRouter);
+  mount(app);
 
   // Error handler (must be last)
   app.use(errorHandler);
