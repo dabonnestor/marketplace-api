@@ -25,7 +25,7 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/marketplace_test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/marketplace_test
       JWT_SECRET: ci-jwt-secret-that-is-at-least-32-chars-long!!
       JWT_REFRESH_SECRET: ci-jwt-refresh-secret-that-is-at-least-32-chars!!
       STRIPE_SECRET_KEY: sk_test_ci
