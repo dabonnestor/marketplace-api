@@ -2,11 +2,13 @@
 
 ## Problem Statement
 
-The user needs a backend API for a two-sided marketplace where buyers and sellers transact physical goods. The platform must handle real payments via Stripe Connect, hold funds between payment and delivery, take a flat commission, and enforce a structured order lifecycle with refunds, disputes, and seller onboarding. The API must be secure, testable, well-documented, and built on a stack that balances developer velocity with production readiness.
+The user needs a backend API for a two-sided marketplace where buyers and sellers transact physical goods. The platform must handle real payments via Stripe Connect, hold funds between payment and delivery, take a flat commission, and enforce a structured order lifecycle with refunds, disputes, and seller onboarding. The API must be secure, testable, well-documented, deployed to a publicly accessible HTTPS endpoint (so Stripe webhooks can be received and the API can serve real traffic), and built on a stack that balances developer velocity with production readiness.
 
 ## Solution
 
 A RESTful Express API written in TypeScript with PostgreSQL as the database. Users have a single account that supports both buying and selling. Sellers create listings (after completing Stripe Connect onboarding), buyers place orders and pay via Stripe, and orders progress through a state machine from pending through to completed. The platform takes a 10% commission on each transaction, retained when payouts are sent to sellers' Stripe Connect accounts. Stripe webhooks serve as a safety net for async events (payment confirmation, disputes). Full-text search on listings is handled via PostgreSQL tsvector. Authentication uses email/password with bcrypt-hashed passwords and JWT access + refresh tokens. The API is documented via OpenAPI 3.0 with Swagger UI.
+
+The app is deployed to Railway with a Railway-managed PostgreSQL database, containerized via a multi-stage Dockerfile. Migrations run as a Railway pre-start hook. CI runs on every PR to main via GitHub Actions, running type-checking and integration tests before allowing merge. Railway auto-deploys on push to main. Infrastructure configuration is committed to the repository.
 
 ## User Stories
 
@@ -87,6 +89,21 @@ A RESTful Express API written in TypeScript with PostgreSQL as the database. Use
 49. As a developer integrating with the API, I want an OpenAPI spec served at a documentation endpoint, so that I can explore and test the API interactively.
 50. As an operator, I want structured JSON logs for every request and error, so that I can monitor and debug the service in production.
 51. As a developer, I want integration tests covering the full request-response lifecycle, so that I can refactor with confidence.
+
+### Deployment & CI/CD
+
+52. As a developer, I want to run `docker build .` and get a working image of the API, so that I can test the production artifact locally.
+53. As a developer, I want the Docker build context to exclude unnecessary files, so that builds are fast and secrets aren't accidentally shipped.
+54. As a developer, I want database migrations to run automatically before the app starts in production, so that the schema is always in sync with the code.
+55. As a developer, I want the app to refuse to deploy if migrations fail, so that a broken schema change doesn't silently leave the old code running.
+56. As a platform operator, I want the app deployed on an HTTPS endpoint with automatic TLS, so that Stripe can deliver webhooks and buyers can make purchases securely.
+57. As a platform operator, I want log verbosity configurable by environment, so that I can use debug level locally and info level in production.
+58. As a contributor, I want CI to run on every PR, so that type errors and test failures are caught before code reaches main.
+59. As a contributor, I want CI to fail fast on type errors before running tests, so that I get quick feedback on type mistakes.
+60. As a contributor, I want CI to require PostgreSQL, so that integration tests run against a real database.
+61. As a developer, I want deployment configuration to be committed to the repository, so that it is versioned and discoverable.
+62. As a developer, I want the OpenAPI spec to show the production server URL, so that I can test endpoints from Swagger UI against the deployed API.
+63. As a developer, I want `pino-pretty` to be a dev-only dependency, so that the production image doesn't carry unnecessary formatting packages.
 
 ## Implementation Decisions
 
@@ -201,7 +218,8 @@ refunded   → (terminal)
 - `.env` file loaded via dotenv at startup
 - Environment variables validated against a Zod schema; app crashes on startup if required vars are missing
 - Typed config object (`config.database.url`, not `process.env.DATABASE_URL`) used everywhere
-- Required vars: `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+- Required vars: `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `BASE_URL`, `FRONTEND_URL`, `NODE_ENV`, `PORT`
+- `BASE_URL` wired into the OpenAPI spec servers array so Swagger UI shows the production server URL
 
 ### Module Structure
 
@@ -221,6 +239,64 @@ refunded   → (terminal)
 - **Vitest**: `pool: "forks"` with `singleFork: true` to avoid parallel test interference on the shared test database.
 - **Stripe test cards**: `4242 4242 4242 4242` for success, `4000 0000 0000 0002` for decline. Webhook tests use `stripe.webhooks.generateTestHeaderString()`.
 
+## Deployment
+
+### Platform
+
+- Railway for hosting. Single service (Express app) + Railway managed PostgreSQL.
+- Railway default domain (`*.up.railway.app`) with automatic TLS. No custom domain.
+- Single instance, no horizontal scaling for now.
+- Single production environment — no staging.
+
+### Containerization
+
+- Multi-stage Dockerfile: `node:22-slim` for both build and runtime.
+- **Builder stage**: `npm ci` (includes devDependencies for `tsc`), then `tsc` compiles `src/` to `dist/`.
+- **Runtime stage**: `npm ci --omit=dev` (dependencies only), `COPY --from=builder dist/`, runs `node dist/main.js`.
+- Non-root user in the runtime stage.
+- `.dockerignore` excludes: `node_modules`, `dist`, `.env`, `.git`, `src/__tests__`, `docs`, `*.md`, `*.config.*` (except `package.json` and `tsconfig.json`, which are needed by `npm ci` and `tsc` respectively).
+
+### Migrations
+
+- Migrations run as a Railway pre-start hook: `node dist/db/migrate.js`.
+- `tsc` compiles `src/db/migrate.ts` → `dist/db/migrate.js` automatically (it's within the `"include": ["src"]` tsconfig).
+- Drizzle tracks which migrations have run — pre-start re-run is idempotent.
+- If migrations fail, the new deploy never replaces the old one (Railway zero-downtime deploy + health check gate).
+
+### CI/CD
+
+- **Deploy**: Railway GitHub integration auto-deploys on push to main. No manual deploy step.
+- **PR gate**: GitHub Actions workflow on PR to main runs:
+  1. `npm ci`
+  2. `tsc --noEmit` (fail fast on type errors)
+  3. `vitest run` (integration tests against PostgreSQL service container)
+- Branch protection on `main`: require PR + passing CI before merge.
+- No lint step (ESLint would be scope creep).
+
+### Configuration Files
+
+- `railway.toml` committed to the repo. Sources of truth:
+  - **File**: build/packaging config, health check path, pre-start hook, service name.
+  - **Railway dashboard**: secrets (`DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_URL`, `BASE_URL`, `NODE_ENV`, `PORT`).
+- Secrets are referenced by name in `railway.toml` — values are never committed.
+- `.env` file stays in `.gitignore` for local dev only.
+
+### Environment Variables in Production
+
+All env vars from the config schema run in production, injected by Railway:
+- `DATABASE_URL` — auto-populated by Railway managed PostgreSQL
+- `NODE_ENV` — set to `production`
+- `PORT` — injected by Railway
+- `BASE_URL` — set to the Railway default domain URL
+- `FRONTEND_URL` — placeholder, set to a dummy value until the frontend exists
+- `JWT_SECRET`, `JWT_REFRESH_SECRET` — generated secrets
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — from Stripe dashboard
+
+### Production Logging
+
+- `pino-pretty` moved to devDependencies. The logger already uses it conditionally (`NODE_ENV === "development"`), but listing it as a production dependency was incorrect. The runtime stage won't install devDependencies, so this is both correct and a tiny image shrink.
+- In production (`NODE_ENV=production`), output is raw JSON — no `pino-pretty` formatting.
+
 ## Out of Scope
 
 - Email notifications via Resend or any email provider
@@ -238,7 +314,15 @@ refunded   → (terminal)
 - OAuth / social login
 - Role-based access beyond buyer/seller contextual checks
 - In-app notifications or real-time updates (WebSockets/SSE)
-- Deployment infrastructure (Railway/Render configuration)
+- Custom domain
+- Staging environment
+- Horizontal scaling (multiple instances)
+- ESLint or lint step in CI
+- Docker Compose for local development
+- Monitoring/alerting beyond Railway's built-in log viewer
+- Database backup configuration (Railway managed PostgreSQL has daily snapshots)
+- GitHub Actions deploy step (Railway auto-deploy handles this)
+- No new tests for deployment artifacts — config files either work or they don't. Verification is manual: push, watch Railway deploy, hit the health check.
 
 ## Further Notes
 
@@ -253,3 +337,10 @@ refunded   → (terminal)
 - The reservation TTL (30 minutes) uses database-side `now()` for expiry checks to avoid clock-skew between the API server and the database.
 - The PaymentIntent's `clientSecret` is stored in the database so the frontend can re-mount the Stripe PaymentElement after a page refresh on pending orders.
 - Listing responses include `sellerName` via a JOIN with the users table. Order list responses include `listingTitle` and `listingImage` from the related listing.
+- Railway managed PostgreSQL uses `DATABASE_URL` as the connection string env var name — the same name the app's config already expects. No renaming needed.
+- The health check endpoint is at `GET /api/health`, returns 200 with `{ "status": "ok" }`.
+- Railway's pre-start hook runs before the health check — if the hook fails, the health check never executes and Railway treats the deploy as failed.
+- The Dockerfile builder stage needs the full `npm ci` (not `--omit=dev`) because `tsc` is a devDependency.
+- The CI PostgreSQL service uses the official `postgres:16` Docker image, matching what Railway managed PostgreSQL runs.
+- Railway injects a random `PORT` — the app's Zod config coerces it to int with a default of 8080, but in production Railway always sets it.
+- `pino-http` automatically logs every request/response. In production (`NODE_ENV=production`), output is raw JSON.
