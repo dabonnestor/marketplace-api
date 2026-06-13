@@ -148,6 +148,25 @@ Webhook handlers are idempotent: replaying an already-processed event produces a
 - **Logging**: Pino (structured JSON)
 - **Docs**: OpenAPI 3.0 / Swagger UI
 - **Tests**: Vitest + Supertest (integration tests against real DB and Stripe test mode)
+- **CI/CD**: GitHub Actions (type-check + integration tests with PostgreSQL 16 on PR/push to main)
+- **Deployment**: Railway with auto-deploy on push to main, configured via `railway.toml`
+
+## Deployment
+
+### Docker
+
+```bash
+docker build -t marketplace-api .
+docker run -p 8080:8080 --env-file .env marketplace-api
+```
+
+The multi-stage Dockerfile uses `node:22-slim` for both build and runtime stages, runs as a non-root user, and excludes unnecessary files (node_modules, tests, docs) from the build context via `.dockerignore`.
+
+### Railway
+
+Deployed on [Railway](https://railway.app). On push to `main`, Railway auto-deploys the Docker image. Database migrations (`node dist/db/migrate.js`) run as a pre-start hook, gated by the `/api/health` endpoint — a failed migration prevents the new deploy from replacing the old one. The health check path, pre-start command, and service name are configured in `railway.toml`.
+
+Secrets (`DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`) are set in the Railway dashboard and referenced by name in `railway.toml` — values are never committed.
 
 ## Project Structure
 
