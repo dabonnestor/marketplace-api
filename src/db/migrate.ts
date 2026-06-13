@@ -1,11 +1,9 @@
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./index.js";
 import { logger } from "../shared/logger.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const migrationsFolder = join(__dirname, "migrations");
+const migrationsFolder = join(import.meta.dirname, "migrations");
 
 async function runMigrations() {
   logger.info("Running database migrations...");
