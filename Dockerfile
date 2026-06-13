@@ -7,7 +7,6 @@ RUN npm ci
 
 COPY src ./src
 RUN npm run build
-COPY src/db/migrations ./dist/db/migrations
 
 FROM node:22-slim AS runtime
 
