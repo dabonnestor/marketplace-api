@@ -201,12 +201,19 @@ src/
 │   │   ├── orchestration.ts    # Order lifecycle operations
 │   │   ├── queries.ts          # Read-side queries (buyer purchases, seller sales)
 │   │   ├── commission.ts       # 10% platform fee calculation
+│   │   ├── reservation.ts      # Listing reservation management
 │   │   ├── openapi.ts
+│   │   ├── order-lifecycle/
+│   │   │   ├── index.ts
+│   │   │   ├── state-machine.ts    # Order lifecycle state machine
+│   │   │   ├── expiry.ts           # Pending order expiry (30 min, lazy cleanup)
+│   │   │   └── transition-order.ts # Status transition executor
 │   │   └── __tests__/
 │   ├── seller/
 │   │   ├── index.ts
-│   │   ├── seller.routes.ts    # Seller onboarding routes
-│   │   ├── seller.service.ts   # Stripe Connect onboarding
+│   │   ├── seller.routes.ts                # Seller onboarding routes
+│   │   ├── seller.service.ts               # Stripe Connect onboarding
+│   │   ├── require-onboarding.middleware.ts # Onboarding gate for listing creation
 │   │   └── openapi.ts
 │   └── webhooks/
 │       ├── index.ts
@@ -220,14 +227,14 @@ src/
 │   ├── logger.ts          # Pino logger
 │   ├── openapi.ts         # OpenAPI spec builder
 │   ├── pagination.ts      # Shared paginate helper
-│   ├── reservation.ts     # Listing reservation management
+│   ├── reservation.ts     # Re-export of features/orders/reservation.ts
 │   ├── order-lifecycle/
-│   │   ├── index.ts
-│   │   ├── state-machine.ts    # Order lifecycle state machine
-│   │   ├── expiry.ts           # Pending order expiry (30 min, lazy cleanup)
-│   │   └── transition-order.ts # Status transition executor
+│   │   ├── index.ts       # Re-exports from features/orders/order-lifecycle/
+│   │   ├── state-machine.ts
+│   │   ├── expiry.ts
+│   │   └── transition-order.ts
 │   ├── payments/
-│   │   ├── payments-adapter.ts # Consolidated Stripe operations adapter
+│   │   ├── payments-adapter.ts # Stripe operations adapter (command-dispatch interface)
 │   │   ├── stripe-client.ts    # Stripe SDK instance
 │   │   ├── amount-utils.ts     # Decimal ↔ cents conversion
 │   │   ├── error-mapping.ts    # Stripe error → AppError
