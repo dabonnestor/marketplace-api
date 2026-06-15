@@ -70,7 +70,7 @@ vi.mock("../../../db/index.js", () => ({
   }),
 }));
 
-const { listBuyerOrders, listSellerOrders } = await import("../orders.service.js");
+const { listOrders } = await import("../orders.service.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -89,8 +89,8 @@ function fakePaginatedResult(overrides: any = {}) {
   };
 }
 
-describe("listBuyerOrders", () => {
-  it("returns paginated orders with listingTitle and listingImage", async () => {
+describe("listOrders", () => {
+  it("returns paginated orders with listingTitle and listingImage for buyer role", async () => {
     mockPaginate.mockResolvedValueOnce(
       fakePaginatedResult({
         data: [
@@ -104,7 +104,7 @@ describe("listBuyerOrders", () => {
       }),
     );
 
-    const result = await listBuyerOrders("buyer_1", 1, 10);
+    const result = await listOrders("buyer_1", "buyer", 1, 10);
 
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toMatchObject({
@@ -116,27 +116,7 @@ describe("listBuyerOrders", () => {
     expect(result.pagination).toEqual({ page: 1, limit: 10, total: 1, totalPages: 1 });
   });
 
-  it("filters by status when provided", async () => {
-    mockPaginate.mockResolvedValueOnce(fakePaginatedResult());
-
-    await listBuyerOrders("buyer_1", 1, 10, "paid");
-
-    // Verify paginate was called (status filter applied internally)
-    expect(mockPaginate).toHaveBeenCalledOnce();
-  });
-
-  it("returns empty data array when no orders exist", async () => {
-    mockPaginate.mockResolvedValueOnce(fakePaginatedResult());
-
-    const result = await listBuyerOrders("buyer_1", 1, 10);
-
-    expect(result.data).toEqual([]);
-    expect(result.pagination.total).toBe(0);
-  });
-});
-
-describe("listSellerOrders", () => {
-  it("returns paginated orders with listingTitle and listingImage", async () => {
+  it("returns paginated orders with listingTitle and listingImage for seller role", async () => {
     mockPaginate.mockResolvedValueOnce(
       fakePaginatedResult({
         data: [
@@ -150,7 +130,7 @@ describe("listSellerOrders", () => {
       }),
     );
 
-    const result = await listSellerOrders("seller_1", 1, 10);
+    const result = await listOrders("seller_1", "seller", 1, 10);
 
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toMatchObject({
@@ -163,7 +143,7 @@ describe("listSellerOrders", () => {
   it("filters by status when provided", async () => {
     mockPaginate.mockResolvedValueOnce(fakePaginatedResult());
 
-    await listSellerOrders("seller_1", 1, 10, "shipped");
+    await listOrders("buyer_1", "buyer", 1, 10, "paid");
 
     expect(mockPaginate).toHaveBeenCalledOnce();
   });
@@ -171,7 +151,7 @@ describe("listSellerOrders", () => {
   it("returns empty data array when no orders exist", async () => {
     mockPaginate.mockResolvedValueOnce(fakePaginatedResult());
 
-    const result = await listSellerOrders("seller_1", 1, 10);
+    const result = await listOrders("seller_1", "seller", 1, 10);
 
     expect(result.data).toEqual([]);
     expect(result.pagination.total).toBe(0);

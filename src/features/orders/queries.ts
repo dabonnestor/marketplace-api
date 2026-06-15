@@ -27,49 +27,15 @@ export async function getOrder(orderId: string, userId: string) {
   return order;
 }
 
-export async function listBuyerOrders(
-  buyerId: string,
+export async function listOrders(
+  userId: string,
+  role: "buyer" | "seller",
   page: number,
   limit: number,
   status?: string,
 ) {
-  const conditions = [eq(schema.orders.buyerId, buyerId)];
-  if (status) conditions.push(eq(schema.orders.status, status as any));
-
-  const baseQuery = db
-    .select({
-      order: schema.orders,
-      listingTitle: schema.listings.title,
-      listingImage: sql<string>`${schema.listings.images}[1]`,
-    })
-    .from(schema.orders)
-    .leftJoin(schema.listings, eq(schema.orders.listingId, schema.listings.id))
-    .where(and(...conditions))
-    .orderBy(desc(schema.orders.createdAt));
-
-  const countQuery = db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.orders)
-    .where(and(...conditions));
-
-  const result = await paginate(baseQuery, countQuery, page, limit);
-  return {
-    data: result.data.map((row) => ({
-      ...row.order,
-      listingTitle: row.listingTitle,
-      listingImage: row.listingImage,
-    })),
-    pagination: result.pagination,
-  };
-}
-
-export async function listSellerOrders(
-  sellerId: string,
-  page: number,
-  limit: number,
-  status?: string,
-) {
-  const conditions = [eq(schema.orders.sellerId, sellerId)];
+  const column = role === "buyer" ? schema.orders.buyerId : schema.orders.sellerId;
+  const conditions = [eq(column, userId)];
   if (status) conditions.push(eq(schema.orders.status, status as any));
 
   const baseQuery = db

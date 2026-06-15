@@ -40,14 +40,14 @@ ordersRouter.post("/:id/refund", asyncHandler(async (req, res) => {
 // Buyer: list my purchases
 ordersRouter.get("/buyer/purchases", validate(listOrdersSchema, "query"), asyncHandler(async (req, res) => {
   const { page, limit, status } = req.query as any;
-  const result = await ordersService.listBuyerOrders(req.user!.sub, page, limit, status);
+  const result = await ordersService.listOrders(req.user!.sub, "buyer", page, limit, status);
   res.json(result);
 }));
 
 // Seller: list my sales
 ordersRouter.get("/seller/sales", validate(listOrdersSchema, "query"), asyncHandler(async (req, res) => {
   const { page, limit, status } = req.query as any;
-  const result = await ordersService.listSellerOrders(req.user!.sub, page, limit, status);
+  const result = await ordersService.listOrders(req.user!.sub, "seller", page, limit, status);
   res.json(result);
 }));
 
