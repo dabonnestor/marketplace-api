@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { transition } from "../../../shared/order-lifecycle/state-machine.js";
+import { transition } from "../order-lifecycle/state-machine.js";
 
 describe("OrderStateMachine.transition", () => {
   it("allows pending → paid by buyer", () => {

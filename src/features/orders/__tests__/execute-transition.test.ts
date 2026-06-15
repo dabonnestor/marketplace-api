@@ -43,7 +43,7 @@ vi.mock("../../../shared/errors.js", () => ({
   },
 }));
 
-const { transitionOrder } = await import("../../../shared/order-lifecycle/transition-order.js");
+const { transitionOrder } = await import("../order-lifecycle/transition-order.js");
 
 beforeEach(() => {
   vi.clearAllMocks();

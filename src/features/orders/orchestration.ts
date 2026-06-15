@@ -7,7 +7,7 @@ import {
   NotFoundError,
 } from "../../shared/errors.js";
 import { calculateOrderBreakdown } from "./commission.js";
-import { type OrderStatus } from "../../shared/order-lifecycle/state-machine.js";
+import { type OrderStatus } from "./order-lifecycle/state-machine.js";
 import {
   createPaymentIntent,
   retrievePaymentIntent,
@@ -17,9 +17,9 @@ import {
   createTransfer,
 } from "../../shared/payments/payments-adapter.js";
 import { logger } from "../../shared/logger.js";
-import { resolveListingStatus } from "../../shared/reservation.js";
-import { expireIfStale } from "../../shared/order-lifecycle/expiry.js";
-import { transitionOrder } from "../../shared/order-lifecycle/transition-order.js";
+import { resolveListingStatus } from "./reservation.js";
+import { expireIfStale } from "./order-lifecycle/expiry.js";
+import { transitionOrder } from "./order-lifecycle/transition-order.js";
 import { getOrder } from "./queries.js";
 
 export async function createOrGetPaymentIntent(order: {
