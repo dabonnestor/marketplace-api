@@ -4,7 +4,7 @@ import { db, schema } from "../../db/index.js";
 import { logger } from "../../shared/logger.js";
 import { AppError } from "../../shared/errors.js";
 import { transitionOrder } from "../orders/order-lifecycle/transition-order.js";
-import { expireIfStale } from "../orders/order-lifecycle/expiry.js";
+import { expireIfStale } from "../orders/reservation.js";
 
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {

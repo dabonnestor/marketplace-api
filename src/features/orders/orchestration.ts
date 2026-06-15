@@ -10,8 +10,7 @@ import { calculateOrderBreakdown } from "./commission.js";
 import { type OrderStatus } from "./order-lifecycle/state-machine.js";
 import { execute } from "../../shared/payments/payments-adapter.js";
 import { logger } from "../../shared/logger.js";
-import { resolveListingStatus } from "./reservation.js";
-import { expireIfStale } from "./order-lifecycle/expiry.js";
+import { isAvailable, getStatus, expireIfStale } from "./reservation.js";
 import { transitionOrder } from "./order-lifecycle/transition-order.js";
 import { getOrder } from "./queries.js";
 
@@ -54,7 +53,7 @@ export async function createOrder(buyerId: string, listingId: string) {
     throw new NotFoundError("Listing", listingId);
   }
 
-  const effectiveStatus = await resolveListingStatus(listingId);
+  const effectiveStatus = await getStatus(listingId);
 
   if (effectiveStatus === "reserved") {
     throw new ConflictError("This listing already has a pending order");

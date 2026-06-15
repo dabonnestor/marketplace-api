@@ -3,7 +3,7 @@ import { eq, and, sql, gte, lte, desc } from "drizzle-orm";
 import { AppError, ForbiddenError, NotFoundError } from "../../shared/errors.js";
 import { paginate } from "../../shared/pagination.js";
 import { execute } from "../../shared/payments/payments-adapter.js";
-import { resolveListingStatus } from "../orders/reservation.js";
+import { getStatus } from "../orders/reservation.js";
 import type { CreateListingInput, UpdateListingInput, ListListingsQuery } from "./listings.schemas.js";
 
 async function ensureOnboarded(sellerId: string) {
@@ -57,7 +57,7 @@ export async function getById(id: string) {
   const listing = { ...row.listing, sellerName: row.sellerName };
 
   // Lazy expiry: if listing is reserved but the pending order has expired, release it
-  listing.status = await resolveListingStatus(id);
+  listing.status = await getStatus(id);
 
   return listing;
 }

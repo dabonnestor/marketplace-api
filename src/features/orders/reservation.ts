@@ -1,6 +1,7 @@
 import { db, schema } from "../../db/index.js";
 import { eq, and } from "drizzle-orm";
 import { expireIfStale } from "./order-lifecycle/expiry.js";
+export { expireIfStale };
 
 async function getPendingOrderOnListing(listingId: string) {
   const [order] = await db
@@ -16,7 +17,7 @@ async function getPendingOrderOnListing(listingId: string) {
   return order ?? null;
 }
 
-export async function resolveListingStatus(
+async function resolveListingStatus(
   listingId: string,
 ): Promise<string> {
   const [listing] = await db
@@ -38,4 +39,19 @@ export async function resolveListingStatus(
   }
 
   return listing.status;
+}
+
+/**
+ * Can this listing be ordered? True only when the effective status is "active".
+ */
+export async function isAvailable(listingId: string): Promise<boolean> {
+  const status = await resolveListingStatus(listingId);
+  return status === "active";
+}
+
+/**
+ * Effective listing status, with lazy expiry of stale reservations.
+ */
+export async function getStatus(listingId: string): Promise<string> {
+  return resolveListingStatus(listingId);
 }
