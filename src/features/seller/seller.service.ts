@@ -1,6 +1,6 @@
 import { db, schema } from "../../db/index.js";
 import { eq } from "drizzle-orm";
-import { retrieveAccount, createAccount, createAccountLink } from "../../shared/payments/payments-adapter.js";
+import { execute } from "../../shared/payments/payments-adapter.js";
 import { config } from "../../shared/config.js";
 
 export async function getStatus(userId: string) {
@@ -14,7 +14,7 @@ export async function getStatus(userId: string) {
     return { onboarded: false, chargesEnabled: false, payoutsEnabled: false };
   }
 
-  const account = await retrieveAccount(user.stripeAccountId);
+  const { account } = await execute({ type: "retrieve_account", accountId: user.stripeAccountId });
 
   return {
     onboarded: true,
@@ -33,7 +33,7 @@ export async function onboard(userId: string) {
   let accountId = user?.stripeAccountId ?? null;
 
   if (!accountId) {
-    const account = await createAccount();
+    const { account } = await execute({ type: "create_account" });
 
     accountId = account.id;
 
@@ -43,7 +43,8 @@ export async function onboard(userId: string) {
       .where(eq(schema.users.id, userId));
   }
 
-  const accountLink = await createAccountLink({
+  const { accountLink } = await execute({
+    type: "create_account_link",
     account: accountId,
     refreshUrl: `${config.FRONTEND_URL}/dashboard/seller/onboard`,
     returnUrl: `${config.FRONTEND_URL}/dashboard/seller/onboard`,

@@ -52,17 +52,7 @@ vi.mock("../../logger.js", () => ({
   logger: { error: (...args: any[]) => mockLoggerError(...args) },
 }));
 
-const {
-  createPaymentIntent,
-  retrievePaymentIntent,
-  confirmPaymentIntent,
-  cancelPaymentIntent,
-  createRefund,
-  createTransfer,
-  retrieveAccount,
-  createAccount,
-  createAccountLink,
-} = await import("../payments-adapter.js");
+const { execute } = await import("../payments-adapter.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -72,21 +62,14 @@ function fakePI(overrides: Partial<Stripe.PaymentIntent> = {}) {
   return { id: "pi_test", client_secret: "cs_test", ...overrides } as Stripe.PaymentIntent;
 }
 
-function fakeRefund(overrides: Partial<Stripe.Refund> = {}) {
-  return { id: "re_test", ...overrides } as Stripe.Refund;
-}
+// ── create_payment_intent ──────────────────────────────────────────
 
-function fakeTransfer(overrides: Partial<Stripe.Transfer> = {}) {
-  return { id: "tr_test", ...overrides } as Stripe.Transfer;
-}
-
-// ── createPaymentIntent ────────────────────────────────────────
-
-describe("createPaymentIntent", () => {
+describe("execute('create_payment_intent')", () => {
   it("creates a Stripe PaymentIntent with amount in cents, usd, automatic capture, and card", async () => {
     mockPaymentIntentsCreate.mockResolvedValueOnce(fakePI());
 
-    await createPaymentIntent({
+    await execute({
+      type: "create_payment_intent",
       idempotencyKey: "order_1",
       amount: "105.00",
       metadata: { order_id: "order_1" },
@@ -103,7 +86,8 @@ describe("createPaymentIntent", () => {
   it("passes metadata through to Stripe", async () => {
     mockPaymentIntentsCreate.mockResolvedValueOnce(fakePI());
 
-    await createPaymentIntent({
+    await execute({
+      type: "create_payment_intent",
       idempotencyKey: "o1",
       amount: "10.00",
       metadata: { order_id: "o1", buyer_id: "b1" },
@@ -113,18 +97,19 @@ describe("createPaymentIntent", () => {
     expect(callArgs.metadata).toEqual({ order_id: "o1", buyer_id: "b1" });
   });
 
-  it("returns the PI id and clientSecret", async () => {
+  it("returns payment_intent_created with id and clientSecret", async () => {
     mockPaymentIntentsCreate.mockResolvedValueOnce(
       fakePI({ id: "pi_abc", client_secret: "cs_xyz" }),
     );
 
-    const result = await createPaymentIntent({
+    const result = await execute({
+      type: "create_payment_intent",
       idempotencyKey: "o1",
       amount: "10.00",
       metadata: {},
     });
 
-    expect(result).toEqual({ id: "pi_abc", clientSecret: "cs_xyz" });
+    expect(result).toEqual({ type: "payment_intent_created", id: "pi_abc", clientSecret: "cs_xyz" });
   });
 
   it("returns null clientSecret when Stripe returns null", async () => {
@@ -132,13 +117,14 @@ describe("createPaymentIntent", () => {
       fakePI({ id: "pi_abc", client_secret: null }),
     );
 
-    const result = await createPaymentIntent({
+    const result = await execute({
+      type: "create_payment_intent",
       idempotencyKey: "o1",
       amount: "10.00",
       metadata: {},
     });
 
-    expect(result).toEqual({ id: "pi_abc", clientSecret: null });
+    expect(result).toEqual({ type: "payment_intent_created", id: "pi_abc", clientSecret: null });
   });
 
   it("maps Stripe errors through mapStripeError", async () => {
@@ -149,22 +135,22 @@ describe("createPaymentIntent", () => {
     mockPaymentIntentsCreate.mockRejectedValueOnce(stripeError);
 
     await expect(
-      createPaymentIntent({ idempotencyKey: "o1", amount: "10.00", metadata: {} }),
+      execute({ type: "create_payment_intent", idempotencyKey: "o1", amount: "10.00", metadata: {} }),
     ).rejects.toThrow();
   });
 });
 
-// ── retrievePaymentIntent ──────────────────────────────────────
+// ── retrieve_payment_intent ────────────────────────────────────────
 
-describe("retrievePaymentIntent", () => {
+describe("execute('retrieve_payment_intent')", () => {
   it("retrieves the PI from Stripe and returns it", async () => {
     const pi = fakePI({ id: "pi_123", status: "requires_confirmation" as any });
     mockPaymentIntentsRetrieve.mockResolvedValueOnce(pi);
 
-    const result = await retrievePaymentIntent("pi_123");
+    const result = await execute({ type: "retrieve_payment_intent", paymentIntentId: "pi_123" });
 
     expect(mockPaymentIntentsRetrieve).toHaveBeenCalledWith("pi_123");
-    expect(result).toEqual(pi);
+    expect(result).toEqual({ type: "payment_intent", paymentIntent: pi });
   });
 
   it("maps Stripe errors", async () => {
@@ -172,21 +158,23 @@ describe("retrievePaymentIntent", () => {
       new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
     );
 
-    await expect(retrievePaymentIntent("pi_123")).rejects.toThrow();
+    await expect(
+      execute({ type: "retrieve_payment_intent", paymentIntentId: "pi_123" }),
+    ).rejects.toThrow();
   });
 });
 
-// ── confirmPaymentIntent ───────────────────────────────────────
+// ── confirm_payment_intent ─────────────────────────────────────────
 
-describe("confirmPaymentIntent", () => {
+describe("execute('confirm_payment_intent')", () => {
   it("confirms the PI and returns it", async () => {
     const pi = fakePI({ id: "pi_123", status: "succeeded" as any });
     mockPaymentIntentsConfirm.mockResolvedValueOnce(pi);
 
-    const result = await confirmPaymentIntent("pi_123");
+    const result = await execute({ type: "confirm_payment_intent", paymentIntentId: "pi_123" });
 
     expect(mockPaymentIntentsConfirm).toHaveBeenCalledWith("pi_123");
-    expect(result).toEqual(pi);
+    expect(result).toEqual({ type: "payment_intent", paymentIntent: pi });
   });
 
   it("maps Stripe errors", async () => {
@@ -194,21 +182,23 @@ describe("confirmPaymentIntent", () => {
       new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
     );
 
-    await expect(confirmPaymentIntent("pi_123")).rejects.toThrow();
+    await expect(
+      execute({ type: "confirm_payment_intent", paymentIntentId: "pi_123" }),
+    ).rejects.toThrow();
   });
 });
 
-// ── cancelPaymentIntent ────────────────────────────────────────
+// ── cancel_payment_intent ──────────────────────────────────────────
 
-describe("cancelPaymentIntent", () => {
+describe("execute('cancel_payment_intent')", () => {
   it("cancels the PI and returns it", async () => {
     const pi = fakePI({ id: "pi_123", status: "canceled" as any });
     mockPaymentIntentsCancel.mockResolvedValueOnce(pi);
 
-    const result = await cancelPaymentIntent("pi_123");
+    const result = await execute({ type: "cancel_payment_intent", paymentIntentId: "pi_123" });
 
     expect(mockPaymentIntentsCancel).toHaveBeenCalledWith("pi_123");
-    expect(result).toEqual(pi);
+    expect(result).toEqual({ type: "payment_intent", paymentIntent: pi });
   });
 
   it("maps Stripe errors", async () => {
@@ -216,17 +206,20 @@ describe("cancelPaymentIntent", () => {
       new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
     );
 
-    await expect(cancelPaymentIntent("pi_123")).rejects.toThrow();
+    await expect(
+      execute({ type: "cancel_payment_intent", paymentIntentId: "pi_123" }),
+    ).rejects.toThrow();
   });
 });
 
-// ── createRefund ───────────────────────────────────────────────
+// ── create_refund ──────────────────────────────────────────────────
 
-describe("createRefund", () => {
+describe("execute('create_refund')", () => {
   it("creates a refund with the correct payment_intent and amount in cents", async () => {
-    mockRefundsCreate.mockResolvedValueOnce(fakeRefund({ id: "re_xyz" }));
+    mockRefundsCreate.mockResolvedValueOnce({ id: "re_xyz" });
 
-    const result = await createRefund({
+    const result = await execute({
+      type: "create_refund",
       paymentIntentId: "pi_abc",
       amount: "50.00",
     });
@@ -234,7 +227,7 @@ describe("createRefund", () => {
     const [callArgs] = mockRefundsCreate.mock.calls[0];
     expect(callArgs.payment_intent).toBe("pi_abc");
     expect(callArgs.amount).toBe(5000);
-    expect(result).toEqual({ id: "re_xyz" });
+    expect(result).toEqual({ type: "refund_created", id: "re_xyz" });
   });
 
   it("maps Stripe errors", async () => {
@@ -243,18 +236,19 @@ describe("createRefund", () => {
     );
 
     await expect(
-      createRefund({ paymentIntentId: "pi_abc", amount: "10.00" }),
+      execute({ type: "create_refund", paymentIntentId: "pi_abc", amount: "10.00" }),
     ).rejects.toThrow();
   });
 });
 
-// ── createTransfer ─────────────────────────────────────────────
+// ── create_transfer ────────────────────────────────────────────────
 
-describe("createTransfer", () => {
+describe("execute('create_transfer')", () => {
   it("creates a transfer with the correct amount, currency, destination, and metadata", async () => {
-    mockTransfersCreate.mockResolvedValueOnce(fakeTransfer({ id: "tr_xyz" }));
+    mockTransfersCreate.mockResolvedValueOnce({ id: "tr_xyz" });
 
-    const result = await createTransfer({
+    const result = await execute({
+      type: "create_transfer",
       amount: "95.00",
       destination: "acct_seller_1",
       metadata: { order_id: "o1", buyer_id: "b1", seller_id: "s1" },
@@ -265,10 +259,10 @@ describe("createTransfer", () => {
     expect(callArgs.currency).toBe("usd");
     expect(callArgs.destination).toBe("acct_seller_1");
     expect(callArgs.metadata).toEqual({ order_id: "o1", buyer_id: "b1", seller_id: "s1" });
-    expect(result).toEqual({ id: "tr_xyz" });
+    expect(result).toEqual({ type: "transfer_created", id: "tr_xyz" });
   });
 
-  it("throws a 502 TRANSFER_FAILED AppError on StripeError", async () => {
+  it("maps Stripe errors through mapStripeError", async () => {
     const stripeError = new Stripe.errors.StripeError({
       type: "api_error",
       message: "Transfer failed",
@@ -276,8 +270,8 @@ describe("createTransfer", () => {
     mockTransfersCreate.mockRejectedValueOnce(stripeError);
 
     await expect(
-      createTransfer({ amount: "10.00", destination: "acct_x", metadata: {} }),
-    ).rejects.toThrow("Stripe transfer failed");
+      execute({ type: "create_transfer", amount: "10.00", destination: "acct_x", metadata: {} }),
+    ).rejects.toThrow();
   });
 
   it("re-throws non-Stripe errors as-is", async () => {
@@ -285,22 +279,22 @@ describe("createTransfer", () => {
     mockTransfersCreate.mockRejectedValueOnce(genericError);
 
     await expect(
-      createTransfer({ amount: "10.00", destination: "acct_x", metadata: {} }),
+      execute({ type: "create_transfer", amount: "10.00", destination: "acct_x", metadata: {} }),
     ).rejects.toThrow("network error");
   });
 });
 
-// ── retrieveAccount ────────────────────────────────────────────
+// ── retrieve_account ───────────────────────────────────────────────
 
-describe("retrieveAccount", () => {
+describe("execute('retrieve_account')", () => {
   it("retrieves a Stripe account by ID and returns it", async () => {
     const account = { id: "acct_123", charges_enabled: true, payouts_enabled: false };
     mockAccountsRetrieve.mockResolvedValueOnce(account);
 
-    const result = await retrieveAccount("acct_123");
+    const result = await execute({ type: "retrieve_account", accountId: "acct_123" });
 
     expect(mockAccountsRetrieve).toHaveBeenCalledWith("acct_123");
-    expect(result).toEqual(account);
+    expect(result).toEqual({ type: "account", account });
   });
 
   it("maps Stripe errors through mapStripeError", async () => {
@@ -308,18 +302,20 @@ describe("retrieveAccount", () => {
       new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
     );
 
-    await expect(retrieveAccount("acct_123")).rejects.toThrow();
+    await expect(
+      execute({ type: "retrieve_account", accountId: "acct_123" }),
+    ).rejects.toThrow();
   });
 });
 
-// ── createAccount ──────────────────────────────────────────────
+// ── create_account ─────────────────────────────────────────────────
 
-describe("createAccount", () => {
+describe("execute('create_account')", () => {
   it("creates a Stripe Express account with transfers and card_payments capabilities", async () => {
     const account = { id: "acct_xyz" };
     mockAccountsCreate.mockResolvedValueOnce(account);
 
-    const result = await createAccount();
+    const result = await execute({ type: "create_account" });
 
     const [callArgs] = mockAccountsCreate.mock.calls[0];
     expect(callArgs.type).toBe("express");
@@ -327,7 +323,7 @@ describe("createAccount", () => {
       transfers: { requested: true },
       card_payments: { requested: true },
     });
-    expect(result).toEqual(account);
+    expect(result).toEqual({ type: "account", account });
   });
 
   it("maps Stripe errors through mapStripeError", async () => {
@@ -335,18 +331,19 @@ describe("createAccount", () => {
       new Stripe.errors.StripeError({ type: "api_error", message: "boom" } as any),
     );
 
-    await expect(createAccount()).rejects.toThrow();
+    await expect(execute({ type: "create_account" })).rejects.toThrow();
   });
 });
 
-// ── createAccountLink ──────────────────────────────────────────
+// ── create_account_link ────────────────────────────────────────────
 
-describe("createAccountLink", () => {
+describe("execute('create_account_link')", () => {
   it("creates an account link with the correct parameters", async () => {
     const link = { url: "https://connect.stripe.com/setup/t" };
     mockAccountLinksCreate.mockResolvedValueOnce(link);
 
-    const result = await createAccountLink({
+    const result = await execute({
+      type: "create_account_link",
       account: "acct_xyz",
       refreshUrl: "https://app.example/refresh",
       returnUrl: "https://app.example/return",
@@ -357,7 +354,7 @@ describe("createAccountLink", () => {
     expect(callArgs.refresh_url).toBe("https://app.example/refresh");
     expect(callArgs.return_url).toBe("https://app.example/return");
     expect(callArgs.type).toBe("account_onboarding");
-    expect(result).toEqual(link);
+    expect(result).toEqual({ type: "account_link", accountLink: link });
   });
 
   it("maps Stripe errors through mapStripeError", async () => {
@@ -366,7 +363,7 @@ describe("createAccountLink", () => {
     );
 
     await expect(
-      createAccountLink({ account: "a", refreshUrl: "r", returnUrl: "u" }),
+      execute({ type: "create_account_link", account: "a", refreshUrl: "r", returnUrl: "u" }),
     ).rejects.toThrow();
   });
 });

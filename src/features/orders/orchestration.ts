@@ -8,14 +8,7 @@ import {
 } from "../../shared/errors.js";
 import { calculateOrderBreakdown } from "./commission.js";
 import { type OrderStatus } from "./order-lifecycle/state-machine.js";
-import {
-  createPaymentIntent,
-  retrievePaymentIntent,
-  confirmPaymentIntent,
-  cancelPaymentIntent,
-  createRefund,
-  createTransfer,
-} from "../../shared/payments/payments-adapter.js";
+import { execute } from "../../shared/payments/payments-adapter.js";
 import { logger } from "../../shared/logger.js";
 import { resolveListingStatus } from "./reservation.js";
 import { expireIfStale } from "./order-lifecycle/expiry.js";
@@ -29,7 +22,8 @@ export async function createOrGetPaymentIntent(order: {
   sellerId: string;
   listingId: string;
 }) {
-  const { id, clientSecret } = await createPaymentIntent({
+  const { id, clientSecret } = await execute({
+    type: "create_payment_intent",
     idempotencyKey: order.id,
     amount: order.total,
     metadata: {
@@ -166,10 +160,10 @@ export async function payOrder(orderId: string, userId: string) {
     stripePaymentIntentId = pi.id;
   }
 
-  const pi = await retrievePaymentIntent(stripePaymentIntentId);
+  const { paymentIntent: pi } = await execute({ type: "retrieve_payment_intent", paymentIntentId: stripePaymentIntentId });
 
   if (pi.status === "requires_confirmation") {
-    await confirmPaymentIntent(stripePaymentIntentId);
+    await execute({ type: "confirm_payment_intent", paymentIntentId: stripePaymentIntentId });
   } else if (pi.status !== "succeeded" && pi.status !== "processing") {
     throw new AppError(
       400,
@@ -207,7 +201,7 @@ export async function cancelOrder(orderId: string, userId: string) {
 
   // Cancel the PaymentIntent if exists
   if (order.stripePaymentIntentId) {
-    await cancelPaymentIntent(order.stripePaymentIntentId);
+    await execute({ type: "cancel_payment_intent", paymentIntentId: order.stripePaymentIntentId });
   }
 
   const updated = await transitionOrder(order, "cancelled", { userId });
@@ -237,7 +231,8 @@ export async function refundOrder(orderId: string, userId: string) {
     throw new ForbiddenError("Only the buyer can request a refund");
   }
 
-  const { id: stripeRefundId } = await createRefund({
+  const { id: stripeRefundId } = await execute({
+    type: "create_refund",
     paymentIntentId: order.stripePaymentIntentId!,
     amount: order.total,
   });
@@ -266,7 +261,8 @@ export async function completeOrder(orderId: string, userId: string) {
     throw new AppError(502, "TRANSFER_FAILED", "Stripe transfer failed");
   }
 
-  const { id: stripeTransferId } = await createTransfer({
+  const { id: stripeTransferId } = await execute({
+    type: "create_transfer",
     amount: order.sellerPayout,
     destination: seller.stripeAccountId,
     metadata: {

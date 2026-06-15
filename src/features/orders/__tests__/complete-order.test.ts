@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockTransfersCreate = vi.fn();
+const mockExecute = vi.fn();
 const mockLoggerError = vi.fn();
 
 // DB mocks
@@ -9,7 +9,7 @@ const mockDbUpdateSet = vi.fn();
 const mockDbUpdateWhere = vi.fn();
 
 vi.mock("../../../shared/payments/payments-adapter.js", () => ({
-  createTransfer: (...args: any[]) => mockTransfersCreate(...args),
+  execute: (...args: any[]) => mockExecute(...args),
 }));
 
 vi.mock("../../../shared/logger.js", () => ({
@@ -113,15 +113,16 @@ describe("completeOrder", () => {
     // DB: transitionOrder update
     mockDbUpdateSet.mockClear();
 
-    mockTransfersCreate.mockResolvedValueOnce({ id: "tr_xyz" });
+    mockExecute.mockResolvedValueOnce({ type: "transfer_created", id: "tr_xyz" });
 
     const result = await completeOrder("order_1", "buyer_1");
 
-    expect(mockTransfersCreate).toHaveBeenCalled();
-    const transferArgs = mockTransfersCreate.mock.calls[0][0];
-    expect(transferArgs.amount).toBe("95.00");
-    expect(transferArgs.destination).toBe("acct_seller_1");
-    expect(transferArgs.metadata).toEqual({
+    expect(mockExecute).toHaveBeenCalled();
+    const command = mockExecute.mock.calls[0][0];
+    expect(command.type).toBe("create_transfer");
+    expect(command.amount).toBe("95.00");
+    expect(command.destination).toBe("acct_seller_1");
+    expect(command.metadata).toEqual({
       order_id: "order_1",
       buyer_id: "buyer_1",
       seller_id: "seller_1",
@@ -145,7 +146,7 @@ describe("completeOrder", () => {
     mockDbSelectLimit.mockResolvedValueOnce([sampleOrder]);
     mockDbSelectLimit.mockResolvedValueOnce([{ stripeAccountId: "acct_seller_1" }]);
 
-    mockTransfersCreate.mockRejectedValueOnce(new Error("Stripe transfer failed"));
+    mockExecute.mockRejectedValueOnce(new Error("Stripe transfer failed"));
 
     await expect(completeOrder("order_1", "buyer_1")).rejects.toThrow("Stripe transfer failed");
 

@@ -795,7 +795,7 @@ describe("completed transfer", () => {
         .set("Authorization", `Bearer ${buyerToken}`);
 
       expect(completed.status).toBe(502);
-      expect(completed.body.error.code).toBe("TRANSFER_FAILED");
+      expect(completed.body.error.code).toBe("PAYMENT_SERVICE_UNAVAILABLE");
 
       // Order stays in delivered
       const getOrder = await request(app)

@@ -2,130 +2,91 @@ import Stripe from "stripe";
 import { stripe } from "./stripe-client.js";
 import { toCents } from "./amount-utils.js";
 import { mapStripeError } from "./error-mapping.js";
-import { AppError } from "../errors.js";
-import { logger } from "../logger.js";
 
-export async function createPaymentIntent(params: {
-  idempotencyKey: string;
-  amount: string;
-  metadata: Record<string, string>;
-}) {
-  try {
-    const pi = await stripe.paymentIntents.create(
-      {
-        amount: toCents(params.amount),
-        currency: "usd",
-        capture_method: "automatic",
-        payment_method_types: ["card"],
-        metadata: params.metadata,
-      },
-      { idempotencyKey: params.idempotencyKey },
-    );
-    return { id: pi.id, clientSecret: pi.client_secret ?? null };
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
+// ── Command types ──────────────────────────────────────────────────
 
-export async function retrievePaymentIntent(piId: string) {
-  try {
-    return await stripe.paymentIntents.retrieve(piId);
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
+export type PaymentCommand =
+  | { type: "create_payment_intent"; idempotencyKey: string; amount: string; metadata: Record<string, string> }
+  | { type: "retrieve_payment_intent"; paymentIntentId: string }
+  | { type: "confirm_payment_intent"; paymentIntentId: string }
+  | { type: "cancel_payment_intent"; paymentIntentId: string }
+  | { type: "create_refund"; paymentIntentId: string; amount: string }
+  | { type: "create_transfer"; amount: string; destination: string; metadata: Record<string, string> }
+  | { type: "retrieve_account"; accountId: string }
+  | { type: "create_account" }
+  | { type: "create_account_link"; account: string; refreshUrl: string; returnUrl: string };
 
-export async function confirmPaymentIntent(piId: string) {
-  try {
-    return await stripe.paymentIntents.confirm(piId);
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
+// ── Result types ───────────────────────────────────────────────────
 
-export async function cancelPaymentIntent(piId: string) {
-  try {
-    return await stripe.paymentIntents.cancel(piId);
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
+export type PaymentResult =
+  | { type: "payment_intent_created"; id: string; clientSecret: string | null }
+  | { type: "payment_intent"; paymentIntent: Stripe.PaymentIntent }
+  | { type: "refund_created"; id: string }
+  | { type: "transfer_created"; id: string }
+  | { type: "account"; account: Stripe.Account }
+  | { type: "account_link"; accountLink: Stripe.AccountLink };
 
-export async function createRefund(params: {
-  paymentIntentId: string;
-  amount: string;
-}) {
-  try {
-    const refund = await stripe.refunds.create({
-      payment_intent: params.paymentIntentId,
-      amount: toCents(params.amount),
-    });
-    return { id: refund.id };
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
+// ── Execute ────────────────────────────────────────────────────────
 
-export async function retrieveAccount(accountId: string) {
+export async function execute(command: PaymentCommand): Promise<PaymentResult> {
   try {
-    return await stripe.accounts.retrieve(accountId);
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
-
-export async function createAccount() {
-  try {
-    return await stripe.accounts.create({
-      type: "express",
-      capabilities: {
-        transfers: { requested: true },
-        card_payments: { requested: true },
-      },
-    });
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
-
-export async function createAccountLink(params: {
-  account: string;
-  refreshUrl: string;
-  returnUrl: string;
-}) {
-  try {
-    return await stripe.accountLinks.create({
-      account: params.account,
-      refresh_url: params.refreshUrl,
-      return_url: params.returnUrl,
-      type: "account_onboarding",
-    });
-  } catch (err) {
-    throw mapStripeError(err);
-  }
-}
-
-export async function createTransfer(params: {
-  amount: string;
-  destination: string;
-  metadata: Record<string, string>;
-}) {
-  try {
-    const transfer = await stripe.transfers.create({
-      amount: toCents(params.amount),
-      currency: "usd",
-      destination: params.destination,
-      metadata: params.metadata,
-    });
-    return { id: transfer.id };
-  } catch (err) {
-    if (err instanceof Stripe.errors.StripeError) {
-      logger.error(
-        { stripeRequestId: err.requestId, stripeType: err.type },
-        "Stripe transfer failed",
-      );
-      throw new AppError(502, "TRANSFER_FAILED", "Stripe transfer failed");
+    switch (command.type) {
+      case "create_payment_intent": {
+        const pi = await stripe.paymentIntents.create(
+          {
+            amount: toCents(command.amount),
+            currency: "usd",
+            capture_method: "automatic",
+            payment_method_types: ["card"],
+            metadata: command.metadata,
+          },
+          { idempotencyKey: command.idempotencyKey },
+        );
+        return { type: "payment_intent_created", id: pi.id, clientSecret: pi.client_secret ?? null };
+      }
+      case "retrieve_payment_intent":
+        return { type: "payment_intent", paymentIntent: await stripe.paymentIntents.retrieve(command.paymentIntentId) };
+      case "confirm_payment_intent":
+        return { type: "payment_intent", paymentIntent: await stripe.paymentIntents.confirm(command.paymentIntentId) };
+      case "cancel_payment_intent":
+        return { type: "payment_intent", paymentIntent: await stripe.paymentIntents.cancel(command.paymentIntentId) };
+      case "create_refund": {
+        const refund = await stripe.refunds.create({
+          payment_intent: command.paymentIntentId,
+          amount: toCents(command.amount),
+        });
+        return { type: "refund_created", id: refund.id };
+      }
+      case "create_transfer": {
+        const transfer = await stripe.transfers.create({
+          amount: toCents(command.amount),
+          currency: "usd",
+          destination: command.destination,
+          metadata: command.metadata,
+        });
+        return { type: "transfer_created", id: transfer.id };
+      }
+      case "retrieve_account":
+        return { type: "account", account: await stripe.accounts.retrieve(command.accountId) };
+      case "create_account":
+        return { type: "account", account: await stripe.accounts.create({
+          type: "express",
+          capabilities: {
+            transfers: { requested: true },
+            card_payments: { requested: true },
+          },
+        }) };
+      case "create_account_link":
+        return { type: "account_link", accountLink: await stripe.accountLinks.create({
+          account: command.account,
+          refresh_url: command.refreshUrl,
+          return_url: command.returnUrl,
+          type: "account_onboarding",
+        }) };
+      default:
+        throw new Error(`Unknown command: ${(command as any).type}`);
     }
-    throw err;
+  } catch (err) {
+    throw mapStripeError(err);
   }
 }
