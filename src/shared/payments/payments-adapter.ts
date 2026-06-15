@@ -26,10 +26,27 @@ export type PaymentResult =
   | { type: "account"; account: Stripe.Account }
   | { type: "account_link"; accountLink: Stripe.AccountLink };
 
+// ── Result type map ─────────────────────────────────────────────────
+
+type CommandResultType = {
+  create_payment_intent: "payment_intent_created";
+  retrieve_payment_intent: "payment_intent";
+  confirm_payment_intent: "payment_intent";
+  cancel_payment_intent: "payment_intent";
+  create_refund: "refund_created";
+  create_transfer: "transfer_created";
+  retrieve_account: "account";
+  create_account: "account";
+  create_account_link: "account_link";
+};
+
 // ── Execute ────────────────────────────────────────────────────────
 
-export async function execute(command: PaymentCommand): Promise<PaymentResult> {
+export async function execute<C extends PaymentCommand>(
+  command: C,
+): Promise<Extract<PaymentResult, { type: CommandResultType[C["type"]] }>> {
   try {
+    let result: PaymentResult;
     switch (command.type) {
       case "create_payment_intent": {
         const pi = await stripe.paymentIntents.create(
@@ -42,20 +59,25 @@ export async function execute(command: PaymentCommand): Promise<PaymentResult> {
           },
           { idempotencyKey: command.idempotencyKey },
         );
-        return { type: "payment_intent_created", id: pi.id, clientSecret: pi.client_secret ?? null };
+        result = { type: "payment_intent_created", id: pi.id, clientSecret: pi.client_secret ?? null };
+        break;
       }
       case "retrieve_payment_intent":
-        return { type: "payment_intent", paymentIntent: await stripe.paymentIntents.retrieve(command.paymentIntentId) };
+        result = { type: "payment_intent", paymentIntent: await stripe.paymentIntents.retrieve(command.paymentIntentId) };
+        break;
       case "confirm_payment_intent":
-        return { type: "payment_intent", paymentIntent: await stripe.paymentIntents.confirm(command.paymentIntentId) };
+        result = { type: "payment_intent", paymentIntent: await stripe.paymentIntents.confirm(command.paymentIntentId) };
+        break;
       case "cancel_payment_intent":
-        return { type: "payment_intent", paymentIntent: await stripe.paymentIntents.cancel(command.paymentIntentId) };
+        result = { type: "payment_intent", paymentIntent: await stripe.paymentIntents.cancel(command.paymentIntentId) };
+        break;
       case "create_refund": {
         const refund = await stripe.refunds.create({
           payment_intent: command.paymentIntentId,
           amount: toCents(command.amount),
         });
-        return { type: "refund_created", id: refund.id };
+        result = { type: "refund_created", id: refund.id };
+        break;
       }
       case "create_transfer": {
         const transfer = await stripe.transfers.create({
@@ -64,28 +86,39 @@ export async function execute(command: PaymentCommand): Promise<PaymentResult> {
           destination: command.destination,
           metadata: command.metadata,
         });
-        return { type: "transfer_created", id: transfer.id };
+        result = { type: "transfer_created", id: transfer.id };
+        break;
       }
       case "retrieve_account":
-        return { type: "account", account: await stripe.accounts.retrieve(command.accountId) };
+        result = { type: "account", account: await stripe.accounts.retrieve(command.accountId) };
+        break;
       case "create_account":
-        return { type: "account", account: await stripe.accounts.create({
-          type: "express",
-          capabilities: {
-            transfers: { requested: true },
-            card_payments: { requested: true },
-          },
-        }) };
+        result = {
+          type: "account",
+          account: await stripe.accounts.create({
+            type: "express",
+            capabilities: {
+              transfers: { requested: true },
+              card_payments: { requested: true },
+            },
+          }),
+        };
+        break;
       case "create_account_link":
-        return { type: "account_link", accountLink: await stripe.accountLinks.create({
-          account: command.account,
-          refresh_url: command.refreshUrl,
-          return_url: command.returnUrl,
-          type: "account_onboarding",
-        }) };
+        result = {
+          type: "account_link",
+          accountLink: await stripe.accountLinks.create({
+            account: command.account,
+            refresh_url: command.refreshUrl,
+            return_url: command.returnUrl,
+            type: "account_onboarding",
+          }),
+        };
+        break;
       default:
         throw new Error(`Unknown command: ${(command as any).type}`);
     }
+    return result as Extract<PaymentResult, { type: CommandResultType[C["type"]] }>;
   } catch (err) {
     throw mapStripeError(err);
   }
