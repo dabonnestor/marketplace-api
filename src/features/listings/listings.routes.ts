@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../../shared/middleware/auth.js";
 import { validate } from "../../shared/middleware/validate.js";
 import { asyncHandler } from "../../shared/middleware/async-handler.js";
+import { requireOnboarding } from "../seller/require-onboarding.middleware.js";
 import {
   createListingSchema,
   updateListingSchema,
@@ -32,7 +33,7 @@ listingsRouter.get("/:id", asyncHandler(async (req, res) => {
 }));
 
 // Seller: create listing
-listingsRouter.post("/", authenticate, validate(createListingSchema), asyncHandler(async (req, res) => {
+listingsRouter.post("/", authenticate, requireOnboarding, validate(createListingSchema), asyncHandler(async (req, res) => {
   const listing = await listingsService.create(req.body, req.user!.sub);
   res.status(201).json(listing);
 }));
