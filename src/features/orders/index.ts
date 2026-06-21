@@ -8,3 +8,7 @@ export const feature: FeatureDescriptor = {
   openApiPaths: orderPaths,
   openApiSchemas: orderSchemas,
 };
+
+// Public API — other features import only from this barrel
+export { getStatus, isAvailable, expireIfStale } from "./reservation.js";
+export { transitionOrder } from "./order-lifecycle/index.js";

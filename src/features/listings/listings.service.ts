@@ -2,7 +2,7 @@ import { db, schema } from "../../db/index.js";
 import { eq, and, sql, gte, lte, desc } from "drizzle-orm";
 import { ForbiddenError, NotFoundError } from "../../shared/errors.js";
 import { paginate } from "../../shared/pagination.js";
-import { getStatus } from "../orders/reservation.js";
+import { getStatus } from "../orders/index.js";
 import type { CreateListingInput, UpdateListingInput, ListListingsQuery } from "./listings.schemas.js";
 
 export async function create(data: CreateListingInput, sellerId: string) {

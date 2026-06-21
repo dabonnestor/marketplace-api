@@ -8,3 +8,6 @@ export const feature: FeatureDescriptor = {
   openApiPaths: sellerPaths,
   openApiSchemas: sellerSchemas,
 };
+
+// Public API — other features import only from this barrel
+export { requireOnboarding } from "./require-onboarding.middleware.js";

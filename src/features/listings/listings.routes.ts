@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../../shared/middleware/auth.js";
 import { validate } from "../../shared/middleware/validate.js";
 import { asyncHandler } from "../../shared/middleware/async-handler.js";
-import { requireOnboarding } from "../seller/require-onboarding.middleware.js";
+import { requireOnboarding } from "../seller/index.js";
 import {
   createListingSchema,
   updateListingSchema,
