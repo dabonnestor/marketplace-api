@@ -197,7 +197,6 @@ src/
 │   │   ├── index.ts
 │   │   ├── orders.routes.ts
 │   │   ├── orders.schemas.ts
-│   │   ├── orders.service.ts   # Public API (re-exports orchestration + queries)
 │   │   ├── orchestration.ts    # Order lifecycle operations
 │   │   ├── queries.ts          # Read-side queries (buyer purchases, seller sales)
 │   │   ├── commission.ts       # 10% platform fee calculation
@@ -227,17 +226,12 @@ src/
 │   ├── logger.ts          # Pino logger
 │   ├── openapi.ts         # OpenAPI spec builder
 │   ├── pagination.ts      # Shared paginate helper
-│   ├── reservation.ts     # Re-export of features/orders/reservation.ts
-│   ├── order-lifecycle/
-│   │   ├── index.ts       # Re-exports from features/orders/order-lifecycle/
-│   │   ├── state-machine.ts
-│   │   ├── expiry.ts
-│   │   └── transition-order.ts
 │   ├── payments/
 │   │   ├── payments-adapter.ts # Stripe operations adapter (command-dispatch interface)
 │   │   ├── stripe-client.ts    # Stripe SDK instance
 │   │   ├── amount-utils.ts     # Decimal ↔ cents conversion
 │   │   ├── error-mapping.ts    # Stripe error → AppError
+│   │   ├── payments-fake.ts   # InMemoryFake adapter for tests
 │   │   └── __tests__/
 │   ├── middleware/
 │   │   ├── async-handler.ts  # Async error boundary
