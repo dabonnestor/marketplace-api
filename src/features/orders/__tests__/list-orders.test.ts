@@ -70,7 +70,7 @@ vi.mock("../../../db/index.js", () => ({
   }),
 }));
 
-const { listOrders } = await import("../orders.service.js");
+const { listOrders } = await import("../queries.js");
 
 beforeEach(() => {
   vi.clearAllMocks();

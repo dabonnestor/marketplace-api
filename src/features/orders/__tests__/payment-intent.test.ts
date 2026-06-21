@@ -84,7 +84,8 @@ vi.mock("../../../db/index.js", () => {
   };
 });
 
-const { createOrGetPaymentIntent, getOrder } = await import("../orders.service.js");
+const { createOrGetPaymentIntent } = await import("../orchestration.js");
+const { getOrder } = await import("../queries.js");
 
 function fakePaymentIntent(overrides: Partial<Stripe.PaymentIntent> = {}) {
   return {

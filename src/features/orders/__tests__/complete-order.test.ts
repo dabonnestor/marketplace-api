@@ -80,7 +80,7 @@ vi.mock("../../../db/index.js", () => {
   };
 });
 
-const { completeOrder } = await import("../orders.service.js");
+const { completeOrder } = await import("../orchestration.js");
 
 const sampleOrder = {
   id: "order_1",
