@@ -4,7 +4,7 @@ const mockDbSelect = vi.fn();
 const mockDbUpdateSet = vi.fn();
 const mockDbUpdateWhere = vi.fn();
 
-vi.mock("../../db/index.js", () => {
+vi.mock("../../../db/index.js", () => {
   const eq = (a: any, b: any) => ({ type: "eq", left: a, right: b });
   const and = (...args: any[]) => ({ type: "and", args });
   const sql = (strings: TemplateStringsArray, ...values: any[]) => ({
