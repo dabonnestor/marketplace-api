@@ -3,34 +3,17 @@ import request from "supertest";
 import { setupDb, cleanDb, closeDb, getApp, getDb } from "./helpers.js";
 import { orders } from "../db/schema.js";
 import { sql } from "drizzle-orm";
+import { InMemoryFake } from "../shared/payments/payments-fake.js";
+import { setPaymentsAdapter } from "../shared/payments/payments-adapter.js";
 
-const { mockAccountRetrieve } = vi.hoisted(() => ({
-  mockAccountRetrieve: vi.fn().mockResolvedValue({
-    id: "acct_test123",
-    charges_enabled: true,
-    payouts_enabled: true,
-  }),
-}));
-
+// Minimal stub — prevents real Stripe SDK from initializing.
+// Payment operations go through the InMemoryFake, not this stub.
 vi.mock("../shared/payments/stripe-client.js", () => ({
-  stripe: {
-    accounts: {
-      create: vi.fn().mockResolvedValue({ id: "acct_test123" }),
-      retrieve: mockAccountRetrieve,
-    },
-    accountLinks: {
-      create: vi.fn().mockResolvedValue({ url: "https://connect.stripe.com/setup/test" }),
-    },
-    paymentIntents: {
-      create: vi.fn().mockResolvedValue({
-        id: "pi_test123",
-        client_secret: "pi_test123_secret_test",
-      }),
-    },
-  },
+  stripe: {},
 }));
 
 const app = getApp();
+let fake: InMemoryFake;
 
 let sellerToken: string;
 let sellerId: string;
@@ -45,6 +28,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await cleanDb();
+  fake = new InMemoryFake();
+  setPaymentsAdapter(fake);
 
   // Create a seller user and onboard them
   const res = await request(app)
